@@ -3,112 +3,122 @@ use futures::future::LocalBoxFuture;
 use futures::FutureExt;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::collections::VecDeque;
+use std::hash::Hash;
+use std::hash::Hasher;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::task::Context;
 use std::task::Poll;
 use std::task::Waker;
 
-#[derive(Copy, Clone, Eq, Hash, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub struct Id(usize);
 
-impl Id {
-    fn first() -> Self {
-        Self(0)
-    }
-
-    fn next(&mut self) -> Self {
-        self.0 += 1;
-        Self(self.0 - 1)
+impl<'a> From<&'a Waker> for Id {
+    fn from(waker: &'a Waker) -> Self {
+        Self(waker as *const Waker as usize)
     }
 }
 
-pub struct SansIo<'a, T: SansIoMachine> {
-    id: Id,
-    tasks: HashMap<Id, LocalBoxFuture<'a, ()>>,
-    responses: Rc<RefCell<HashMap<Id, T::Response>>>,
+struct State<T: SansIoMachine> {
+    tasks: HashMap<Id, (&'static Waker, LocalBoxFuture<'a, ()>)>,
+    new_tasks: Vec<LocalBoxFuture<'a, ()>>,
+    request: Option<T::Request>,
+    responses: HashMap<Id, T::Response>,
     inner: T,
 }
 
-pub struct SansIoHandler<'a, Request, Response> {
-    id: Id,
-    responses: Rc<RefCell<HashMap<Id, Response>>>,
-    request: Option<Request>,
-    tasks: Vec<LocalBoxFuture<'a, ()>>,
-}
+#[derive(Clone)]
+pub struct SansIo<'a, T: SansIoMachine> {}
 
-impl<'a, Request, Response> SansIoHandler<'a, Request, Response> {
-    fn new(id: Id, responses: Rc<RefCell<HashMap<Id, Response>>>) -> Self {
-        Self {
-            id,
-            responses,
-            request: None,
-            tasks: Vec::new(),
-        }
-    }
-
-    pub fn spawn(&mut self, f: impl Future<Output = ()> + 'a) -> Result<(), SansIoError> {
-        self.tasks.push(f.boxed_local());
-        Ok(())
-    }
-
-    pub fn call(&mut self, request: Request) -> impl Future<Output = Response> {
-        self.request = Some(request);
-        let id = self.id;
-        let responses = self.responses.clone();
-        future::poll_fn(move |_| {
-            if let Some(response) = responses.borrow_mut().remove(&id) {
-                Poll::Ready(response)
-            } else {
-                Poll::Pending
-            }
-        })
-    }
-}
-
-pub trait SansIoMachine {
+pub trait SansIoMachine: Sized {
     type Request;
     type Response;
     type Error;
 
-    async fn start(&self, sansio: &mut SansIoHandler<Self::Request, Self::Response>);
-    async fn handle(
-        &self,
-        sansio: &mut SansIoHandler<Self::Request, Self::Response>,
-        id: Id,
-        response: Self::Response,
-    );
+    async fn start(&self, sansio: &mut SansIo<Self>);
+    async fn handle(&self, sansio: &mut SansIo<Self>, id: Id, response: Self::Response);
 }
 
 impl<'a, T: SansIoMachine> SansIo<'a, T> {
     pub fn new(inner: T) -> Self {
         Self {
-            id: Id::first(),
             tasks: HashMap::new(),
-            responses: Rc::new(RefCell::new(HashMap::new())),
+            new_tasks: Vec::new(),
+            request: None,
+            responses: HashMap::new(),
             inner,
         }
     }
 
+    fn run_async(&mut self, id: Id) -> Vec<(Id, T::Request)> {
+        let mut requests = Vec::new();
+        let mut queue: VecDeque<_> = [id].into_iter().collect();
+        while let Some(id) = queue.pop_front() {
+            let (waker, mut fut) = self.tasks.remove(&id).unwrap();
+            let mut ctx = Context::from_waker(waker);
+            if matches!(fut.poll_unpin(&mut ctx), Poll::Pending)
+                && let Some(request) = self.request.take()
+            {
+                requests.push((id, request));
+            }
+        }
+        requests
+    }
+
     pub fn start(&mut self) -> Vec<(Id, T::Request)> {
-        let mut handler: SansIoHandler<'_, T::Request, _> =
-            SansIoHandler::new(self.id.next(), self.responses.clone());
-        let mut ctx = Context::from_waker(Waker::noop());
-        let mut fut = self.inner.start(&mut handler).boxed_local();
-        let result = fut.poll_unpin(&mut ctx);
+        let waker = Waker::noop();
+        let id = waker.into();
+        self.tasks.insert(
+            id,
+            (
+                waker,
+                async |sansio: &mut SansIo<'_, T::Request, T::Response>| {
+                    {
+                        self.inner.start(self).await;
+                    }
+                    .boxed_local()
+                },
+            ),
+        );
+        if self.run_async(id) {
+            return Vec::new();
+        }
         Vec::new()
     }
 
     pub fn handle(
         &mut self,
         id: Id,
-        _response: T::Response,
+        response: T::Response,
     ) -> Result<Vec<T::Request>, SansIoError> {
+        self.responses.insert(id, response);
         let requests = Vec::new();
         if id.0 >= self.tasks.len() {
             return Err(SansIoError::TaskNotExists);
         }
         Ok(requests)
+    }
+
+    pub fn spawn(&mut self, f: impl Future<Output = ()> + 'a) -> impl Future<Output = ()> {
+        future::poll_fn(|ctx| {
+            let id = ctx.waker().into();
+            self.new_tasks.push(f.boxed_local());
+            Poll::Ready(())
+        })
+    }
+
+    pub fn call(&mut self, request: Request) -> impl Future<Output = Response> {
+        self.request = Some(request);
+        future::poll_fn(|ctx| {
+            let id = ctx.waker().into();
+            if let Some(response) = self.responses.borrow_mut().remove(&id) {
+                Poll::Ready(response)
+            } else {
+                Poll::Pending
+            }
+        })
     }
 }
 
