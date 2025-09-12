@@ -1,129 +1,116 @@
 use futures::future;
 use futures::future::LocalBoxFuture;
 use futures::FutureExt;
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::collections::VecDeque;
-use std::hash::Hash;
-use std::hash::Hasher;
-use std::pin::Pin;
+use std::cell::Cell;
 use std::rc::Rc;
 use std::task::Context;
 use std::task::Poll;
 use std::task::Waker;
 
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
-pub struct Id(usize);
+enum TaskChannel<Request, Response> {
+    Tx(Result<Request, SansIoError>),
+    Rx(Response),
+    None,
+}
 
-impl<'a> From<&'a Waker> for Id {
-    fn from(waker: &'a Waker) -> Self {
-        Self(waker as *const Waker as usize)
+impl<Request, Response> Default for TaskChannel<Request, Response> {
+    fn default() -> Self {
+        TaskChannel::None
     }
 }
 
-struct State<T: SansIoMachine> {
-    tasks: HashMap<Id, (&'static Waker, LocalBoxFuture<'a, ()>)>,
-    new_tasks: Vec<LocalBoxFuture<'a, ()>>,
-    request: Option<T::Request>,
-    responses: HashMap<Id, T::Response>,
-    inner: T,
-}
+pub struct Handler<Request, Response>(Rc<Cell<TaskChannel<Request, Response>>>);
 
-#[derive(Clone)]
-pub struct SansIo<'a, T: SansIoMachine> {}
-
-pub trait SansIoMachine: Sized {
-    type Request;
-    type Response;
-    type Error;
-
-    async fn start(&self, sansio: &mut SansIo<Self>);
-    async fn handle(&self, sansio: &mut SansIo<Self>, id: Id, response: Self::Response);
-}
-
-impl<'a, T: SansIoMachine> SansIo<'a, T> {
-    pub fn new(inner: T) -> Self {
-        Self {
-            tasks: HashMap::new(),
-            new_tasks: Vec::new(),
-            request: None,
-            responses: HashMap::new(),
-            inner,
-        }
+impl<Request, Response> Clone for Handler<Request, Response> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
     }
+}
 
-    fn run_async(&mut self, id: Id) -> Vec<(Id, T::Request)> {
-        let mut requests = Vec::new();
-        let mut queue: VecDeque<_> = [id].into_iter().collect();
-        while let Some(id) = queue.pop_front() {
-            let (waker, mut fut) = self.tasks.remove(&id).unwrap();
-            let mut ctx = Context::from_waker(waker);
-            if matches!(fut.poll_unpin(&mut ctx), Poll::Pending)
-                && let Some(request) = self.request.take()
-            {
-                requests.push((id, request));
+impl<Request, Response> Handler<Request, Response> {
+    pub fn call(&self, request: Request) -> impl Future<Output = Response> {
+        match self.0.replace(TaskChannel::Tx(Ok(request))) {
+            TaskChannel::Tx(_) => {
+                self.0
+                    .replace(TaskChannel::Tx(Err(SansIoError::RequestNotTaken)));
             }
-        }
-        requests
-    }
-
-    pub fn start(&mut self) -> Vec<(Id, T::Request)> {
-        let waker = Waker::noop();
-        let id = waker.into();
-        self.tasks.insert(
-            id,
-            (
-                waker,
-                async |sansio: &mut SansIo<'_, T::Request, T::Response>| {
-                    {
-                        self.inner.start(self).await;
-                    }
-                    .boxed_local()
-                },
-            ),
-        );
-        if self.run_async(id) {
-            return Vec::new();
-        }
-        Vec::new()
-    }
-
-    pub fn handle(
-        &mut self,
-        id: Id,
-        response: T::Response,
-    ) -> Result<Vec<T::Request>, SansIoError> {
-        self.responses.insert(id, response);
-        let requests = Vec::new();
-        if id.0 >= self.tasks.len() {
-            return Err(SansIoError::TaskNotExists);
-        }
-        Ok(requests)
-    }
-
-    pub fn spawn(&mut self, f: impl Future<Output = ()> + 'a) -> impl Future<Output = ()> {
-        future::poll_fn(|ctx| {
-            let id = ctx.waker().into();
-            self.new_tasks.push(f.boxed_local());
-            Poll::Ready(())
-        })
-    }
-
-    pub fn call(&mut self, request: Request) -> impl Future<Output = Response> {
-        self.request = Some(request);
-        future::poll_fn(|ctx| {
-            let id = ctx.waker().into();
-            if let Some(response) = self.responses.borrow_mut().remove(&id) {
-                Poll::Ready(response)
-            } else {
+            TaskChannel::Rx(_) => {
+                self.0
+                    .replace(TaskChannel::Tx(Err(SansIoError::ResponseNotTaken)));
+            }
+            TaskChannel::None => {}
+        };
+        let ch = self.0.clone();
+        future::poll_fn(move |_| match ch.take() {
+            TaskChannel::Tx(request) => {
+                ch.replace(TaskChannel::Tx(request));
                 Poll::Pending
             }
+            TaskChannel::Rx(response) => Poll::Ready(response),
+            TaskChannel::None => panic!("no request or response"),
         })
+    }
+}
+
+pub struct SansIo<'a, Request, Response> {
+    handler: Handler<Request, Response>,
+    task: Option<LocalBoxFuture<'a, ()>>,
+}
+
+impl<'a, Request, Response> SansIo<'a, Request, Response> {
+    pub fn new() -> Self {
+        Self {
+            handler: Handler(Rc::new(Cell::new(TaskChannel::default()))),
+            task: None,
+        }
+    }
+
+    fn run_async(&mut self) -> Result<Option<Request>, SansIoError> {
+        let mut task = self.task.take().unwrap();
+        let waker = Waker::noop();
+        let mut ctx = Context::from_waker(waker);
+        match task.poll_unpin(&mut ctx) {
+            Poll::Ready(_) => Ok(None),
+            Poll::Pending => {
+                self.task = Some(task);
+                let request = match self.handler.0.replace(TaskChannel::None) {
+                    TaskChannel::Tx(request) => request,
+                    TaskChannel::Rx(_) => panic!("response not taken"),
+                    TaskChannel::None => panic!("no request"),
+                };
+                Some(request).transpose()
+            }
+        }
+    }
+
+    pub fn handler(&self) -> Handler<Request, Response> {
+        self.handler.clone()
+    }
+
+    pub fn start(
+        &mut self,
+        f: impl Future<Output = ()> + 'a,
+    ) -> Result<Option<Request>, SansIoError> {
+        self.task = Some(f.boxed_local());
+        self.run_async()
+    }
+
+    pub fn handle(&mut self, response: Response) -> Result<Option<Request>, SansIoError> {
+        match self.handler.0.replace(TaskChannel::Rx(response)) {
+            TaskChannel::Tx(_) => return Err(SansIoError::RequestNotTaken),
+            TaskChannel::Rx(_) => return Err(SansIoError::ResponseNotTaken),
+            TaskChannel::None => {}
+        };
+        self.run_async()
     }
 }
 
 #[derive(thiserror::Error, Debug)]
 pub enum SansIoError {
-    #[error("task not exists")]
-    TaskNotExists,
+    #[error("request not taken")]
+    RequestNotTaken,
+    #[error("response not taken")]
+    ResponseNotTaken,
+    #[error("no request")]
+    NoRequest,
 }

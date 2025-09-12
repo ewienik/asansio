@@ -1,6 +1,4 @@
-use sansio::Id;
-use sansio::SansIoHandler;
-use sansio::SansIoMachine;
+use sansio::Handler;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -10,16 +8,8 @@ impl Proto {
     pub fn new() -> Self {
         Self {}
     }
-}
 
-impl SansIoMachine for Proto {
-    type Request = Request;
-    type Response = Response;
-    type Error = ();
-
-    async fn start(&self, sansio: &mut SansIoHandler<Request>) {}
-
-    async fn handle(&self, sansio: &mut SansIoHandler<Request>, id: Id, response: Response) {}
+    pub async fn start(&self, _handler: Handler<Request, Response>) {}
 }
 
 pub enum Request {

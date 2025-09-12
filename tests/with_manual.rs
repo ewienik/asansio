@@ -5,6 +5,7 @@ use sansio::SansIo;
 
 #[test]
 fn manual() {
-    let mut sansio = SansIo::new(Proto::new());
-    let requests = sansio.start();
+    let proto = Proto::new();
+    let mut sansio = SansIo::new();
+    let request = sansio.start(proto.start(sansio.handler()));
 }
