@@ -66,11 +66,22 @@ impl<'a, Request, Response, Task> SansIo<'a, Request, Response, Task>
 where
     Task: Future<Output = ()>,
 {
-    pub fn new(task: Pin<&'a mut Task>) -> Self {
-        Self {
+    pub fn start(task: Pin<&'a mut Task>) -> (Self, Result<Option<Request>, SansIoError>) {
+        let mut sansio = Self {
             ch: TaskChannel::default(),
             task,
-        }
+        };
+        let result = sansio.run_async();
+        (sansio, result)
+    }
+
+    pub fn handle(&mut self, response: Response) -> Result<Option<Request>, SansIoError> {
+        match mem::replace(&mut self.ch, TaskChannel::Rx(response)) {
+            TaskChannel::Tx(_) => return Err(SansIoError::RequestNotTaken),
+            TaskChannel::Rx(_) => return Err(SansIoError::ResponseNotTaken),
+            TaskChannel::None => {}
+        };
+        self.run_async()
     }
 
     fn run_async(&mut self) -> Result<Option<Request>, SansIoError> {
@@ -87,23 +98,6 @@ where
                 Some(request).transpose()
             }
         }
-    }
-
-    pub fn start(&mut self) -> Result<Option<Request>, SansIoError> {
-        match self.ch {
-            TaskChannel::Tx(_) => Err(SansIoError::RequestNotTaken),
-            TaskChannel::Rx(_) => Err(SansIoError::ResponseNotTaken),
-            TaskChannel::None => self.run_async(),
-        }
-    }
-
-    pub fn handle(&mut self, response: Response) -> Result<Option<Request>, SansIoError> {
-        match mem::replace(&mut self.ch, TaskChannel::Rx(response)) {
-            TaskChannel::Tx(_) => return Err(SansIoError::RequestNotTaken),
-            TaskChannel::Rx(_) => return Err(SansIoError::ResponseNotTaken),
-            TaskChannel::None => {}
-        };
-        self.run_async()
     }
 }
 

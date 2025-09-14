@@ -7,8 +7,7 @@ fn no_response() {
     struct Response;
 
     let task = pin!(async {});
-    let mut sansio: SansIo<Request, Response, _> = SansIo::new(task);
-    let request = sansio.start();
+    let (_, request): (SansIo<Request, Response, _>, _) = SansIo::start(task);
     assert!(matches!(request, Ok(None)));
 }
 
@@ -21,9 +20,8 @@ fn single_call() {
         let response = sansio::call(Request).await;
         assert!(matches!(response, Response));
     });
-    let mut sansio = SansIo::new(task);
 
-    let request = sansio.start();
+    let (mut sansio, request) = SansIo::start(task);
     assert!(matches!(request, Ok(Some(Request))));
 
     let request = sansio.handle(Response);
@@ -44,9 +42,8 @@ fn send_owned_payload() {
         assert!(matches!(response, Response(_)));
         assert_eq!(response.0, [4; 20]);
     });
-    let mut sansio = SansIo::new(task);
 
-    let request = sansio.start();
+    let (mut sansio, request) = SansIo::start(task);
     assert!(matches!(request, Ok(Some(Request(_)))));
     assert_eq!(request.unwrap().unwrap().0, [1; 10]);
 
@@ -75,9 +72,8 @@ fn send_borrowed_payload() {
         assert!(matches!(response, Response(_)));
         assert_eq!(response.0, &[4; 20]);
     });
-    let mut sansio = SansIo::new(task);
 
-    let request = sansio.start();
+    let (mut sansio, request) = SansIo::start(task);
     assert!(matches!(request, Ok(Some(Request(_)))));
     assert_eq!(request.unwrap().unwrap().0, &[1; 10]);
 
