@@ -1,3 +1,5 @@
+#![no_std]
+
 use core::marker::PhantomData;
 use core::mem;
 use core::pin::Pin;
