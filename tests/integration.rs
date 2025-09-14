@@ -8,7 +8,7 @@ fn no_response() {
 
     let task = pin!(async {});
     let (_, request): (SansIo<Request, Response, _>, _) = SansIo::start(task);
-    assert!(matches!(request, Ok(None)));
+    assert!(matches!(request, None));
 }
 
 #[test]
@@ -22,10 +22,10 @@ fn single_call() {
     });
 
     let (mut sansio, request) = SansIo::start(task);
-    assert!(matches!(request, Ok(Some(Request))));
+    assert!(matches!(request, Some(Request)));
 
     let request = sansio.handle(Response);
-    assert!(matches!(request, Ok(None)));
+    assert!(matches!(request, None));
 }
 
 #[test]
@@ -44,15 +44,15 @@ fn send_owned_payload() {
     });
 
     let (mut sansio, request) = SansIo::start(task);
-    assert!(matches!(request, Ok(Some(Request(_)))));
-    assert_eq!(request.unwrap().unwrap().0, [1; 10]);
+    assert!(matches!(request, Some(Request(_))));
+    assert_eq!(request.unwrap().0, [1; 10]);
 
     let request = sansio.handle(Response([2; 20]));
-    assert!(matches!(request, Ok(Some(Request(_)))));
-    assert_eq!(request.unwrap().unwrap().0, [3; 10]);
+    assert!(matches!(request, Some(Request(_))));
+    assert_eq!(request.unwrap().0, [3; 10]);
 
     let request = sansio.handle(Response([4; 20]));
-    assert!(matches!(request, Ok(None)));
+    assert!(matches!(request, None));
 }
 
 #[test]
@@ -74,15 +74,15 @@ fn send_borrowed_payload() {
     });
 
     let (mut sansio, request) = SansIo::start(task);
-    assert!(matches!(request, Ok(Some(Request(_)))));
-    assert_eq!(request.unwrap().unwrap().0, &[1; 10]);
+    assert!(matches!(request, Some(Request(_))));
+    assert_eq!(request.unwrap().0, &[1; 10]);
 
     let response_buf = [2; 20];
     let request = sansio.handle(Response(&response_buf));
-    assert!(matches!(request, Ok(Some(Request(_)))));
-    assert_eq!(request.unwrap().unwrap().0, &[3; 10]);
+    assert!(matches!(request, Some(Request(_))));
+    assert_eq!(request.unwrap().0, &[3; 10]);
 
     let response_buf = [4; 20];
     let request = sansio.handle(Response(&response_buf));
-    assert!(matches!(request, Ok(None)));
+    assert!(matches!(request, None));
 }
