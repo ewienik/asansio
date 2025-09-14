@@ -7,8 +7,7 @@ fn no_response() {
     struct Response;
 
     let task = pin!(async {});
-    let (_, request): (SansIo<Request, Response, _>, _) = SansIo::start(task);
-    assert!(matches!(request, None));
+    assert!(SansIo::<Request, Response, _>::start(task).is_none());
 }
 
 #[test]
@@ -21,11 +20,10 @@ fn single_call() {
         assert!(matches!(response, Response));
     });
 
-    let (mut sansio, request) = SansIo::start(task);
-    assert!(matches!(request, Some(Request)));
+    let (sansio, request) = SansIo::start(task).unwrap();
+    assert!(matches!(request, Request));
 
-    let request = sansio.handle(Response);
-    assert!(matches!(request, None));
+    assert!(sansio.handle(Response).is_none());
 }
 
 #[test]
@@ -43,16 +41,15 @@ fn send_owned_payload() {
         assert_eq!(response.0, [4; 20]);
     });
 
-    let (mut sansio, request) = SansIo::start(task);
-    assert!(matches!(request, Some(Request(_))));
-    assert_eq!(request.unwrap().0, [1; 10]);
+    let (sansio, request) = SansIo::start(task).unwrap();
+    assert!(matches!(request, Request(_)));
+    assert_eq!(request.0, [1; 10]);
 
-    let request = sansio.handle(Response([2; 20]));
-    assert!(matches!(request, Some(Request(_))));
-    assert_eq!(request.unwrap().0, [3; 10]);
+    let (sansio, request) = sansio.handle(Response([2; 20])).unwrap();
+    assert!(matches!(request, Request(_)));
+    assert_eq!(request.0, [3; 10]);
 
-    let request = sansio.handle(Response([4; 20]));
-    assert!(matches!(request, None));
+    assert!(sansio.handle(Response([4; 20])).is_none());
 }
 
 #[test]
@@ -73,16 +70,15 @@ fn send_borrowed_payload() {
         assert_eq!(response.0, &[4; 20]);
     });
 
-    let (mut sansio, request) = SansIo::start(task);
-    assert!(matches!(request, Some(Request(_))));
-    assert_eq!(request.unwrap().0, &[1; 10]);
+    let (sansio, request) = SansIo::start(task).unwrap();
+    assert!(matches!(request, Request(_)));
+    assert_eq!(request.0, &[1; 10]);
 
     let response_buf = [2; 20];
-    let request = sansio.handle(Response(&response_buf));
-    assert!(matches!(request, Some(Request(_))));
-    assert_eq!(request.unwrap().0, &[3; 10]);
+    let (sansio, request) = sansio.handle(Response(&response_buf)).unwrap();
+    assert!(matches!(request, Request(_)));
+    assert_eq!(request.0, &[3; 10]);
 
     let response_buf = [4; 20];
-    let request = sansio.handle(Response(&response_buf));
-    assert!(matches!(request, None));
+    assert!(sansio.handle(Response(&response_buf)).is_none());
 }

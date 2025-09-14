@@ -59,18 +59,19 @@ impl<'a, Request, Response, Task> SansIo<'a, Request, Response, Task>
 where
     Task: Future<Output = ()>,
 {
-    pub fn start(task: Pin<&'a mut Task>) -> (Self, Option<Request>) {
+    pub fn start(task: Pin<&'a mut Task>) -> Option<(Self, Request)> {
         let mut sansio = Self {
             ch: Channel::default(),
             task,
         };
         let result = sansio.run_async();
-        (sansio, result)
+        result.map(|result| (sansio, result))
     }
 
-    pub fn handle(&mut self, response: Response) -> Option<Request> {
+    pub fn handle(mut self, response: Response) -> Option<(Self, Request)> {
         self.ch = Channel::Rx(response);
-        self.run_async()
+        let result = self.run_async();
+        result.map(|result| (self, result))
     }
 
     fn run_async(&mut self) -> Option<Request> {
