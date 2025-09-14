@@ -7,8 +7,6 @@ use core::task::Poll;
 use core::task::RawWaker;
 use core::task::RawWakerVTable;
 use core::task::Waker;
-use futures::future::LocalBoxFuture;
-use futures::FutureExt;
 
 enum TaskChannel<Request, Response> {
     Tx(Result<Request, SansIoError>),
@@ -33,16 +31,16 @@ impl<Request: Unpin, Response: Unpin> Future for Call<Request, Response> {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let waker = cx.waker();
         assert!(ptr::eq(waker.vtable(), &WAKER_VTABLE));
-        let sansio = unsafe { &mut *(waker.data() as *mut SansIo<Request, Response>) };
+        let ch = unsafe { &mut *(waker.data() as *mut TaskChannel<Request, Response>) };
 
-        sansio.ch = TaskChannel::Tx(if self.request.is_none() {
-            match mem::replace(&mut sansio.ch, TaskChannel::None) {
+        *ch = TaskChannel::Tx(if self.request.is_none() {
+            match mem::replace(ch, TaskChannel::None) {
                 TaskChannel::Tx(_) => Err(SansIoError::RequestNotTaken),
                 TaskChannel::Rx(response) => return Poll::Ready(response),
                 TaskChannel::None => Err(SansIoError::NoRequestOrResponse),
             }
         } else {
-            match sansio.ch {
+            match ch {
                 TaskChannel::Tx(_) => Err(SansIoError::RequestNotTaken),
                 TaskChannel::Rx(_) => Err(SansIoError::ResponseNotTaken),
                 TaskChannel::None => Ok(self.request.take().unwrap()),
@@ -59,27 +57,28 @@ pub fn call<Request, Response>(request: Request) -> Call<Request, Response> {
     }
 }
 
-pub struct SansIo<'a, Request, Response> {
+pub struct SansIo<'a, Request, Response, Task> {
     ch: TaskChannel<Request, Response>,
-    task: Option<LocalBoxFuture<'a, ()>>,
+    task: Pin<&'a mut Task>,
 }
 
-impl<'a, Request, Response> SansIo<'a, Request, Response> {
-    pub fn new() -> Self {
+impl<'a, Request, Response, Task> SansIo<'a, Request, Response, Task>
+where
+    Task: Future<Output = ()>,
+{
+    pub fn new(task: Pin<&'a mut Task>) -> Self {
         Self {
             ch: TaskChannel::default(),
-            task: None,
+            task,
         }
     }
 
     fn run_async(&mut self) -> Result<Option<Request>, SansIoError> {
-        let mut task = self.task.take().unwrap();
-        let waker = unsafe { Waker::new(self as *const _ as *const (), &WAKER_VTABLE) };
-        let mut ctx = Context::from_waker(&waker);
-        match task.poll_unpin(&mut ctx) {
+        let waker = unsafe { Waker::new(&self.ch as *const _ as *const (), &WAKER_VTABLE) };
+        let mut cx = Context::from_waker(&waker);
+        match self.task.as_mut().poll(&mut cx) {
             Poll::Ready(_) => Ok(None),
             Poll::Pending => {
-                self.task = Some(task);
                 let request = match mem::replace(&mut self.ch, TaskChannel::None) {
                     TaskChannel::Tx(request) => request,
                     TaskChannel::Rx(_) => return Err(SansIoError::ResponseNotTaken),
@@ -90,12 +89,12 @@ impl<'a, Request, Response> SansIo<'a, Request, Response> {
         }
     }
 
-    pub fn start(
-        &mut self,
-        f: impl Future<Output = ()> + 'a,
-    ) -> Result<Option<Request>, SansIoError> {
-        self.task = Some(f.boxed_local());
-        self.run_async()
+    pub fn start(&mut self) -> Result<Option<Request>, SansIoError> {
+        match self.ch {
+            TaskChannel::Tx(_) => Err(SansIoError::RequestNotTaken),
+            TaskChannel::Rx(_) => Err(SansIoError::ResponseNotTaken),
+            TaskChannel::None => self.run_async(),
+        }
     }
 
     pub fn handle(&mut self, response: Response) -> Result<Option<Request>, SansIoError> {
