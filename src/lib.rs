@@ -12,80 +12,116 @@ use core::task::Waker;
 
 #[derive(Default)]
 enum Channel<Request, Response> {
-    Tx(Request),
-    Rx(Response),
+    Tx(*const Request),
+    Rx(*const Response),
     #[default]
     None,
 }
 
-pub struct Call<Request, Response> {
-    request: Option<Request>,
+impl<Request, Response> Channel<Request, Response> {
+    fn tx(request: &Request) -> Self {
+        Self::Tx(request as *const Request)
+    }
+
+    fn rx(response: &Response) -> Self {
+        Self::Rx(response as *const Response)
+    }
+}
+
+pub struct Call<'a, Request, Response> {
+    request: Option<&'a Request>,
     _response: PhantomData<Response>,
 }
 
-impl<Request: Unpin, Response: Unpin> Future for Call<Request, Response> {
-    type Output = Response;
+impl<'a, Request: Unpin, Response: Unpin> Future for Call<'a, Request, Response> {
+    type Output = Handler<Response>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let waker = cx.waker();
         assert!(ptr::eq(waker.vtable(), &WAKER_VTABLE));
         let ch = unsafe { &mut *(waker.data() as *mut Channel<Request, Response>) };
 
-        if self.request.is_none() {
-            let Channel::Rx(response) = mem::replace(ch, Channel::None) else {
-                unreachable!();
-            };
-            Poll::Ready(response)
-        } else {
-            *ch = Channel::Tx(self.request.take().unwrap());
+        if let Some(request) = self.request.take() {
+            *ch = Channel::tx(request);
             Poll::Pending
+        } else {
+            match ch {
+                Channel::Rx(response) => Poll::Ready(Handler {
+                    response: *response,
+                }),
+                Channel::Tx(_) => Poll::Pending,
+                Channel::None => unreachable!(),
+            }
         }
     }
 }
 
-pub fn call<Request, Response>(request: Request) -> Call<Request, Response> {
-    Call {
-        request: Some(request),
-        _response: PhantomData,
+pub struct Handler<Response> {
+    response: *const Response,
+}
+
+impl<Response> Handler<Response> {
+    pub fn new() -> Self {
+        Self {
+            response: ptr::null(),
+        }
+    }
+
+    pub fn call<Request>(self, request: &Request) -> Call<'_, Request, Response> {
+        Call {
+            request: Some(request),
+            _response: PhantomData,
+        }
+    }
+
+    pub fn response(&self) -> Option<&Response> {
+        if self.response.is_null() {
+            return None;
+        }
+        Some(unsafe { &*self.response })
     }
 }
 
-pub struct SansIo<'a, Request, Response, Task> {
-    ch: Channel<Request, Response>,
+pub struct SansIo<'a, Request, Task> {
+    request: Option<&'a Request>,
     task: Pin<&'a mut Task>,
 }
 
-impl<'a, Request, Response, Task> SansIo<'a, Request, Response, Task>
+impl<'a, Request, Task> SansIo<'a, Request, Task>
 where
     Task: Future<Output = ()>,
 {
-    pub fn start(task: Pin<&'a mut Task>) -> Option<(Self, Request)> {
+    pub fn start<Response>(task: Pin<&'a mut Task>) -> Option<Self> {
         let mut sansio = Self {
-            ch: Channel::default(),
+            request: None,
             task,
         };
-        let result = sansio.run_async();
-        result.map(|result| (sansio, result))
+        sansio
+            .run_async(Channel::<Request, Response>::None)
+            .then_some(sansio)
     }
 
-    pub fn handle(mut self, response: Response) -> Option<(Self, Request)> {
-        self.ch = Channel::Rx(response);
-        let result = self.run_async();
-        result.map(|result| (self, result))
+    pub fn request(&self) -> Option<&'a Request> {
+        self.request
     }
 
-    fn run_async(&mut self) -> Option<Request> {
-        let waker = unsafe { Waker::new(&self.ch as *const _ as *const (), &WAKER_VTABLE) };
+    pub fn handle<Response>(mut self, response: &Response) -> Option<Self> {
+        self.run_async(Channel::rx(response)).then_some(self)
+    }
+
+    fn run_async<Response>(&mut self, mut ch: Channel<Request, Response>) -> bool {
+        let waker = unsafe { Waker::new(&ch as *const _ as *const (), &WAKER_VTABLE) };
         let mut cx = Context::from_waker(&waker);
-        match self.task.as_mut().poll(&mut cx) {
+        self.request = match self.task.as_mut().poll(&mut cx) {
             Poll::Ready(_) => None,
             Poll::Pending => {
-                let Channel::Tx(request) = mem::replace(&mut self.ch, Channel::None) else {
+                let Channel::Tx(request) = mem::replace(&mut ch, Channel::None) else {
                     unreachable!();
                 };
-                Some(request)
+                Some(unsafe { &*request })
             }
-        }
+        };
+        self.request.is_some()
     }
 }
 
