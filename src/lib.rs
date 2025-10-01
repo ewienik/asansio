@@ -28,13 +28,13 @@ impl<Request, Response> Channel<Request, Response> {
     }
 }
 
-pub struct Call<'a, Request, Response> {
+pub struct SansHandle<'a, Request, Response> {
     request: Option<&'a Request>,
     _response: PhantomData<Response>,
 }
 
-impl<'a, Request: Unpin, Response: Unpin> Future for Call<'a, Request, Response> {
-    type Output = Handler<Response>;
+impl<'a, Request: Unpin, Response: Unpin> Future for SansHandle<'a, Request, Response> {
+    type Output = Sans<Response>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let waker = cx.waker();
@@ -46,7 +46,7 @@ impl<'a, Request: Unpin, Response: Unpin> Future for Call<'a, Request, Response>
             Poll::Pending
         } else {
             match ch {
-                Channel::Rx(response) => Poll::Ready(Handler {
+                Channel::Rx(response) => Poll::Ready(Sans {
                     response: *response,
                 }),
                 Channel::Tx(_) => Poll::Pending,
@@ -56,19 +56,19 @@ impl<'a, Request: Unpin, Response: Unpin> Future for Call<'a, Request, Response>
     }
 }
 
-pub struct Handler<Response> {
+pub struct Sans<Response> {
     response: *const Response,
 }
 
-impl<Response> Handler<Response> {
+impl<Response> Sans<Response> {
     pub fn new() -> Self {
         Self {
             response: ptr::null(),
         }
     }
 
-    pub fn call<Request>(self, request: &Request) -> Call<'_, Request, Response> {
-        Call {
+    pub fn handle<Request>(self, request: &Request) -> SansHandle<'_, Request, Response> {
+        SansHandle {
             request: Some(request),
             _response: PhantomData,
         }
@@ -82,25 +82,34 @@ impl<Response> Handler<Response> {
     }
 }
 
-pub struct SansIo<'a, Request, Task> {
+pub struct IoStarter<Request, Response> {
+    _request: PhantomData<Request>,
+    _response: PhantomData<Response>,
+}
+
+pub struct Io<'a, Request, Task> {
     request: Option<&'a Request>,
     task: Pin<&'a mut Task>,
 }
 
-impl<'a, Request, Task> SansIo<'a, Request, Task>
-where
-    Task: Future<Output = ()>,
-{
-    pub fn start<Response>(task: Pin<&'a mut Task>) -> Option<Self> {
-        let mut sansio = Self {
+impl<Request, Response> IoStarter<Request, Response> {
+    pub fn start<Task>(self, task: Pin<&mut Task>) -> Option<Io<'_, Request, Task>>
+    where
+        Task: Future<Output = ()>,
+    {
+        let mut io = Io {
             request: None,
             task,
         };
-        sansio
-            .run_async(Channel::<Request, Response>::None)
-            .then_some(sansio)
+        io.run_async(Channel::<Request, Response>::None)
+            .then_some(io)
     }
+}
 
+impl<'a, Request, Task> Io<'a, Request, Task>
+where
+    Task: Future<Output = ()>,
+{
     pub fn request(&self) -> Option<&'a Request> {
         self.request
     }
@@ -123,6 +132,16 @@ where
         };
         self.request.is_some()
     }
+}
+
+pub fn new<Request, Response>() -> (Sans<Response>, IoStarter<Request, Response>) {
+    (
+        Sans::new(),
+        IoStarter {
+            _request: PhantomData,
+            _response: PhantomData,
+        },
+    )
 }
 
 const WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
