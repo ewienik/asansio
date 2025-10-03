@@ -1,7 +1,6 @@
 #![no_std]
 
 use core::marker::PhantomData;
-use core::mem;
 use core::pin::Pin;
 use core::ptr;
 use core::task::Context;
@@ -34,7 +33,7 @@ pub struct SansHandle<'a, Request, Response> {
 }
 
 impl<'a, Request: Unpin, Response: Unpin> Future for SansHandle<'a, Request, Response> {
-    type Output = Sans<Response>;
+    type Output = SansResponse<Response>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let waker = cx.waker();
@@ -46,7 +45,7 @@ impl<'a, Request: Unpin, Response: Unpin> Future for SansHandle<'a, Request, Res
             Poll::Pending
         } else {
             match ch {
-                Channel::Rx(response) => Poll::Ready(Sans {
+                Channel::Rx(response) => Poll::Ready(SansResponse {
                     response: *response,
                 }),
                 Channel::Tx(_) => Poll::Pending,
@@ -56,24 +55,36 @@ impl<'a, Request: Unpin, Response: Unpin> Future for SansHandle<'a, Request, Res
     }
 }
 
-pub struct Sans<Response> {
+pub struct Sans<Request, Response> {
+    _request: PhantomData<Request>,
+    _response: PhantomData<Response>,
+}
+
+pub struct SansResponse<Response> {
     response: *const Response,
 }
 
-impl<Response> Sans<Response> {
-    pub fn new() -> Self {
-        Self {
-            response: ptr::null(),
-        }
-    }
-
-    pub fn handle<Request>(self, request: &Request) -> SansHandle<'_, Request, Response> {
+impl<Request, Response> Sans<Request, Response> {
+    pub fn start<'a>(&self, request: &'a Request) -> SansHandle<'a, Request, Response> {
         SansHandle {
             request: Some(request),
             _response: PhantomData,
         }
     }
 
+    pub fn handle<'a>(
+        &self,
+        _response: SansResponse<Response>,
+        request: &'a Request,
+    ) -> SansHandle<'a, Request, Response> {
+        SansHandle {
+            request: Some(request),
+            _response: PhantomData,
+        }
+    }
+}
+
+impl<Response> SansResponse<Response> {
     pub fn response(&self) -> Option<&Response> {
         if self.response.is_null() {
             return None;
@@ -82,62 +93,75 @@ impl<Response> Sans<Response> {
     }
 }
 
-pub struct IoStarter<Request, Response> {
+pub struct Io<Request, Response> {
     _request: PhantomData<Request>,
     _response: PhantomData<Response>,
 }
 
-pub struct Io<'a, Request, Task> {
+pub struct IoRequest<'a, Request, Task> {
     request: Option<&'a Request>,
     task: Pin<&'a mut Task>,
 }
 
-impl<Request, Response> IoStarter<Request, Response> {
-    pub fn start<Task>(self, task: Pin<&mut Task>) -> Option<Io<'_, Request, Task>>
+impl<Request, Response> Io<Request, Response> {
+    pub fn start<'a, 'b, Task>(
+        &'a self,
+        task: Pin<&'b mut Task>,
+    ) -> Option<IoRequest<'b, Request, Task>>
     where
         Task: Future<Output = ()>,
     {
-        let mut io = Io {
+        let mut handler = IoRequest {
             request: None,
             task,
         };
-        io.run_async(Channel::<Request, Response>::None)
-            .then_some(io)
+        handler.run_async(Channel::<Request, Response>::None);
+        handler.request.map(|_| handler)
+    }
+
+    pub fn handle<'a, Task>(
+        &self,
+        mut handler: IoRequest<'a, Request, Task>,
+        response: &Response,
+    ) -> Option<IoRequest<'a, Request, Task>>
+    where
+        Task: Future<Output = ()>,
+    {
+        handler.run_async(Channel::rx(response));
+        handler.request.map(move |_| handler)
     }
 }
 
-impl<'a, Request, Task> Io<'a, Request, Task>
+impl<'a, Request, Task> IoRequest<'a, Request, Task>
 where
     Task: Future<Output = ()>,
 {
-    pub fn request(&self) -> Option<&'a Request> {
+    pub fn request(&self) -> Option<&Request> {
         self.request
     }
 
-    pub fn handle<Response>(mut self, response: &Response) -> Option<Self> {
-        self.run_async(Channel::rx(response)).then_some(self)
-    }
-
-    fn run_async<Response>(&mut self, mut ch: Channel<Request, Response>) -> bool {
+    fn run_async<Response>(&mut self, ch: Channel<Request, Response>) {
         let waker = unsafe { Waker::new(&ch as *const _ as *const (), &WAKER_VTABLE) };
         let mut cx = Context::from_waker(&waker);
         self.request = match self.task.as_mut().poll(&mut cx) {
             Poll::Ready(_) => None,
             Poll::Pending => {
-                let Channel::Tx(request) = mem::replace(&mut ch, Channel::None) else {
+                let Channel::Tx(request) = ch else {
                     unreachable!();
                 };
                 Some(unsafe { &*request })
             }
-        };
-        self.request.is_some()
+        }
     }
 }
 
-pub fn new<Request, Response>() -> (Sans<Response>, IoStarter<Request, Response>) {
+pub fn new<Request, Response>() -> (Sans<Request, Response>, Io<Request, Response>) {
     (
-        Sans::new(),
-        IoStarter {
+        Sans {
+            _request: PhantomData,
+            _response: PhantomData,
+        },
+        Io {
             _request: PhantomData,
             _response: PhantomData,
         },
