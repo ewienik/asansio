@@ -64,6 +64,8 @@ pub struct SansResponse<Response> {
     response: *const Response,
 }
 
+unsafe impl<Response> Send for SansResponse<Response> {}
+
 impl<Request, Response> Sans<Request, Response> {
     pub fn start<'a>(&self, request: &'a Request) -> SansHandle<'a, Request, Response> {
         SansHandle {
