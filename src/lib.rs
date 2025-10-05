@@ -9,6 +9,7 @@ use core::task::RawWaker;
 use core::task::RawWakerVTable;
 use core::task::Waker;
 
+/// Store transmission message from(Tx) or to(Rx) Sans
 #[derive(Default)]
 enum Channel<Request, Response> {
     Tx(*const Request),
@@ -27,6 +28,7 @@ impl<Request, Response> Channel<Request, Response> {
     }
 }
 
+/// The Future helper for handling data between Io and Sans
 pub struct SansHandle<'a, Request, Response> {
     request: Option<&'a Request>,
     _response: PhantomData<Response>,
@@ -55,18 +57,22 @@ impl<'a, Request: Unpin, Response: Unpin> Future for SansHandle<'a, Request, Res
     }
 }
 
+/// Manages the Sans part's communication
 pub struct Sans<Request, Response> {
     _request: PhantomData<Request>,
     _response: PhantomData<Response>,
 }
 
+/// The holder of the Response from the Io to Sans
 pub struct SansResponse<Response> {
     response: *const Response,
 }
 
+// It is safe as its lifetime is between two awaits in the Sans part
 unsafe impl<Response> Send for SansResponse<Response> {}
 
 impl<Request, Response> Sans<Request, Response> {
+    /// Initial request from the Sans part.
     pub fn start<'a>(&self, request: &'a Request) -> SansHandle<'a, Request, Response> {
         SansHandle {
             request: Some(request),
@@ -74,6 +80,8 @@ impl<Request, Response> Sans<Request, Response> {
         }
     }
 
+    /// Next requests from the Sans part. It must receive SansResponse from the previous await call
+    /// as the Response is not longer valid.
     pub fn handle<'a>(
         &self,
         _response: SansResponse<Response>,
@@ -87,6 +95,7 @@ impl<Request, Response> Sans<Request, Response> {
 }
 
 impl<Response> SansResponse<Response> {
+    /// Retrieve a reference to the Response from the Io part.
     pub fn response(&self) -> Option<&Response> {
         if self.response.is_null() {
             return None;
@@ -95,17 +104,21 @@ impl<Response> SansResponse<Response> {
     }
 }
 
+/// Manages the Io part's communication
 pub struct Io<Request, Response> {
     _request: PhantomData<Request>,
     _response: PhantomData<Response>,
 }
 
+/// The holder of the Request from the Sans to Io
 pub struct IoRequest<'a, Request, Task> {
     request: Option<&'a Request>,
     task: Pin<&'a mut Task>,
 }
 
 impl<Request, Response> Io<Request, Response> {
+    /// Starts the Sans part defined as a Future Task. Returns on the first async Request from Sans
+    /// or when the Task finishes.
     pub fn start<'a, 'b, Task>(
         &'a self,
         task: Pin<&'b mut Task>,
@@ -121,6 +134,9 @@ impl<Request, Response> Io<Request, Response> {
         handler.request.map(|_| handler)
     }
 
+    /// Next polling of the Future Task of the Sans part. It must receive IoRequest from the
+    /// previous await call as the Response is not longer valid. Returns on the Request from Sans
+    /// or when the Task finishes.
     pub fn handle<'a, Task>(
         &self,
         mut handler: IoRequest<'a, Request, Task>,
@@ -138,6 +154,7 @@ impl<'a, Request, Task> IoRequest<'a, Request, Task>
 where
     Task: Future<Output = ()>,
 {
+    /// Retrieve a reference to the Request from the Sans part.
     pub fn request(&self) -> Option<&Request> {
         self.request
     }
@@ -157,6 +174,7 @@ where
     }
 }
 
+/// Creates a two parts: Sans and Io for the specified Request and Response.
 pub fn new<Request, Response>() -> (Sans<Request, Response>, Io<Request, Response>) {
     (
         Sans {
