@@ -1,7 +1,12 @@
 [package]
-name = "sansio"
+name = "asansio"
 version = "0.1.0"
 edition = "2024"
+authors = ["Pawel Pery"]
+description = "The Async/await state machine for the sans-io design pattern"
+license = "MIT OR Apache-2"
+repository = "https://github.com/ewienik/asansio"
+readme = "README.md"
 
 [dependencies]
 
