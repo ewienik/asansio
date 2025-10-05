@@ -1,7 +1,7 @@
+use asansio::Sans;
 use bytes::BufMut;
 use bytes::Bytes;
 use bytes::BytesMut;
-use sansio::Sans;
 
 pub enum ClientRequest {
     ReadPayload,

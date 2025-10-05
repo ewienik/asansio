@@ -3,12 +3,12 @@ mod pingpong_proto;
 #[path = "../tlv_proto/mod.rs"]
 mod tlv_proto;
 
+use asansio::Sans;
 use bytes::Bytes;
 use pingpong_proto::ClientRequest as PpClientRequest;
 use pingpong_proto::ClientResponse as PpClientResponse;
 use pingpong_proto::ServerRequest as PpServerRequest;
 use pingpong_proto::ServerResponse as PpServerResponse;
-use sansio::Sans;
 use std::pin::pin;
 use std::time::Duration;
 use tlv_proto::ClientRequest as TlvClientRequest;
@@ -97,10 +97,10 @@ fn client_response(response: Option<&ClientResponse>) -> Option<Client> {
 }
 
 pub async fn run_client(sans: Sans<ClientRequest, ClientResponse>) {
-    let (pp_sans, pp_io) = sansio::new();
+    let (pp_sans, pp_io) = asansio::new();
     let pp_task = pin!(pingpong_proto::run_client(pp_sans));
 
-    let (tlv_sans, tlv_io) = sansio::new();
+    let (tlv_sans, tlv_io) = asansio::new();
     let tlv_task = pin!(tlv_proto::run_client(tlv_sans));
 
     let mut pp_io_request = pp_io.start(pp_task);
@@ -192,10 +192,10 @@ fn server_response(response: Option<&ServerResponse>) -> Option<Server> {
 }
 
 pub async fn run_server(sans: Sans<ServerRequest, ServerResponse>) {
-    let (pp_sans, pp_io) = sansio::new();
+    let (pp_sans, pp_io) = asansio::new();
     let pp_task = pin!(pingpong_proto::run_server(pp_sans));
 
-    let (tlv_sans, tlv_io) = sansio::new();
+    let (tlv_sans, tlv_io) = asansio::new();
     let tlv_task = pin!(tlv_proto::run_server(tlv_sans));
 
     let mut pp_io_request = pp_io.start(pp_task);

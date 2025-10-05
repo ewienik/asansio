@@ -1,6 +1,6 @@
+use asansio::Sans;
 use bytes::Bytes;
 use bytes::BytesMut;
-use sansio::Sans;
 use std::time::Duration;
 
 pub enum ClientRequest {

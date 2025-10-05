@@ -5,7 +5,7 @@ fn no_response() {
     struct Request;
     struct Response;
 
-    let (_, io) = sansio::new::<Request, Response>();
+    let (_, io) = asansio::new::<Request, Response>();
 
     let task = pin!(async {});
     assert!(io.start(task).is_none());
@@ -16,7 +16,7 @@ fn single_call() {
     struct Request;
     struct Response;
 
-    let (sans, io) = sansio::new::<Request, Response>();
+    let (sans, io) = asansio::new::<Request, Response>();
 
     let task = pin!(async {
         let response = sans.start(&Request).await;
@@ -34,7 +34,7 @@ fn send_owned_payload() {
     struct Request([u8; 10]);
     struct Response([u8; 20]);
 
-    let (sans, io) = sansio::new::<Request, Response>();
+    let (sans, io) = asansio::new::<Request, Response>();
 
     let task = pin!(async {
         let response = sans.start(&Request([1; 10])).await;
@@ -62,7 +62,7 @@ fn send_borrowed_payload() {
     struct Request<'a>(&'a [u8]);
     struct Response<'a>(&'a [u8]);
 
-    let (sans, io) = sansio::new::<Request, Response>();
+    let (sans, io) = asansio::new::<Request, Response>();
 
     let task = pin!(async {
         let mut request_buf = vec![0u8; 10];

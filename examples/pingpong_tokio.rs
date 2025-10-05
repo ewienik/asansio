@@ -144,7 +144,7 @@ async fn client_process_message(cache: &mut Cache, msg: &String) -> Option<Clien
 async fn client_process(mut tcp: TcpStream) {
     let mut cache = Cache::new();
 
-    let (sans, io) = sansio::new();
+    let (sans, io) = asansio::new();
     let task = pin!(tlv_pingpong_proto::run_client(sans));
 
     let mut request = io.start(task);
@@ -204,7 +204,7 @@ async fn server_process_sleep(duration: Duration) -> Option<ServerResponse> {
 async fn server_process(mut tcp: TcpStream) {
     let mut cache = Cache::new();
 
-    let (sans, io) = sansio::new();
+    let (sans, io) = asansio::new();
     let task = pin!(tlv_pingpong_proto::run_server(sans));
 
     let mut request = io.start(task);
