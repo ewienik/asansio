@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 #[path = "../pingpong_proto/mod.rs"]
 mod pingpong_proto;
 #[path = "../tlv_proto/mod.rs"]
