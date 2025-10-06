@@ -1,4 +1,4 @@
-# sansio
+# asansio
 Async/await state machine for the sans-io design pattern.
 
 ## The Idea
