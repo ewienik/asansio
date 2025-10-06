@@ -1,45 +1,48 @@
 use asansio::Sans;
-use bytes::BufMut;
-use bytes::Bytes;
-use bytes::BytesMut;
+use std::collections::VecDeque;
 
-pub enum ClientRequest {
+pub enum ClientRequest<'a> {
     ReadPayload,
-    WritePayload { payload: Bytes },
-    Read { tag: u8, val: Bytes },
+    WritePayload { payload: &'a [u8] },
+    Read { tag: u8, val: &'a [u8] },
 }
 
-pub enum ClientResponse {
-    ReadPayload { payload: Bytes },
-    Write { tag: u8, val: Bytes },
+pub enum ClientResponse<'a> {
+    ReadPayload { payload: &'a [u8] },
+    Write { tag: u8, val: &'a [u8] },
 }
 
-pub enum ServerRequest {
+pub enum ServerRequest<'a> {
     ReadPayload,
-    WritePayload { payload: Bytes },
-    Read { tag: u8, val: Bytes },
+    WritePayload { payload: &'a [u8] },
+    Read { tag: u8, val: &'a [u8] },
 }
 
-pub enum ServerResponse {
-    ReadPayload { payload: Bytes },
-    Write { tag: u8, val: Bytes },
+pub enum ServerResponse<'a> {
+    ReadPayload { payload: &'a [u8] },
+    Write { tag: u8, val: &'a [u8] },
 }
 
 struct Cache {
-    write: BytesMut,
-    read: BytesMut,
+    write: Vec<u8>,
+    read: VecDeque<u8>,
+    read_consumed: usize,
 }
 
 impl Cache {
     fn new() -> Self {
         Self {
-            write: BytesMut::new(),
-            read: BytesMut::new(),
+            write: Vec::new(),
+            read: VecDeque::new(),
+            read_consumed: 0,
         }
     }
 
-    fn read_packet(&mut self, payload: &Bytes) -> Option<Bytes> {
-        self.read.extend_from_slice(payload);
+    fn read_packet(&mut self, payload: &[u8]) -> Option<&[u8]> {
+        self.read.drain(..self.read_consumed);
+        self.read_consumed = 0;
+
+        payload.iter().for_each(|byte| self.read.push_back(*byte));
 
         if self.read.len() < 2 {
             return None;
@@ -50,35 +53,37 @@ impl Cache {
             return None;
         }
 
-        Some(self.read.split_to(len + 2).freeze())
+        self.read_consumed = len + 2;
+        Some(&self.read.make_contiguous()[..self.read_consumed])
     }
 
-    fn write_packet(&mut self, tag: u8, val: &Bytes) -> Bytes {
-        self.write.put_u8(tag);
-        self.write.put_u8(val.len() as u8);
+    fn write_packet(&mut self, tag: u8, val: &[u8]) -> &[u8] {
+        self.write.clear();
+        self.write.push(tag);
+        self.write.push(val.len() as u8);
         self.write.extend_from_slice(val);
-        self.write.split().freeze()
+        &self.write[0..val.len() + 2]
     }
 }
 
-fn client_read_payload(cache: &mut Cache, payload: &Bytes) -> ClientRequest {
-    if let Some(mut buf) = cache.read_packet(payload) {
+fn client_read_payload<'a>(cache: &'a mut Cache, payload: &[u8]) -> ClientRequest<'a> {
+    if let Some(buf) = cache.read_packet(payload) {
         ClientRequest::Read {
             tag: buf[0],
-            val: buf.split_off(2),
+            val: &buf[2..],
         }
     } else {
         ClientRequest::ReadPayload
     }
 }
 
-fn client_write(cache: &mut Cache, tag: u8, val: &Bytes) -> ClientRequest {
+fn client_write<'a>(cache: &'a mut Cache, tag: u8, val: &[u8]) -> ClientRequest<'a> {
     ClientRequest::WritePayload {
         payload: cache.write_packet(tag, val),
     }
 }
 
-pub async fn run_client(sans: Sans<ClientRequest, ClientResponse>) {
+pub async fn run_client<'a>(sans: Sans<ClientRequest<'a>, ClientResponse<'a>>) {
     let mut cache = Cache::new();
 
     let mut sans_resp = sans.start(&ClientRequest::ReadPayload).await;
@@ -94,24 +99,24 @@ pub async fn run_client(sans: Sans<ClientRequest, ClientResponse>) {
     }
 }
 
-fn server_read_payload(cache: &mut Cache, payload: &Bytes) -> ServerRequest {
-    if let Some(mut buf) = cache.read_packet(payload) {
+fn server_read_payload<'a>(cache: &'a mut Cache, payload: &[u8]) -> ServerRequest<'a> {
+    if let Some(buf) = cache.read_packet(payload) {
         ServerRequest::Read {
             tag: buf[0],
-            val: buf.split_off(2),
+            val: &buf[2..],
         }
     } else {
         ServerRequest::ReadPayload
     }
 }
 
-fn server_write(cache: &mut Cache, tag: u8, val: &Bytes) -> ServerRequest {
+fn server_write<'a>(cache: &'a mut Cache, tag: u8, val: &[u8]) -> ServerRequest<'a> {
     ServerRequest::WritePayload {
         payload: cache.write_packet(tag, val),
     }
 }
 
-pub async fn run_server(sans: Sans<ServerRequest, ServerResponse>) {
+pub async fn run_server<'a>(sans: Sans<ServerRequest<'a>, ServerResponse<'a>>) {
     let mut cache = Cache::new();
 
     let mut sans_resp = sans.start(&ServerRequest::ReadPayload).await;

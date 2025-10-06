@@ -1,6 +1,5 @@
 mod tlv_pingpong_proto;
 
-use bytes::Bytes;
 use clap::Parser;
 use clap::Subcommand;
 use std::net::SocketAddr;
@@ -62,6 +61,7 @@ async fn server(listen: SocketAddr) {
 
 struct Cache {
     buf: Vec<u8>,
+    msg: String,
     count_read: usize,
     count_send: usize,
     count_recv: usize,
@@ -73,6 +73,7 @@ impl Cache {
         buf.reserve(1024);
         Self {
             buf,
+            msg: String::new(),
             count_read: 0,
             count_send: 0,
             count_recv: 0,
@@ -87,17 +88,17 @@ async fn is_eof(tcp: &TcpStream) -> bool {
         .is_read_closed()
 }
 
-async fn client_process_read_payload(
-    cache: &mut Cache,
+async fn client_process_read_payload<'a>(
+    cache: &'a mut Cache,
     tcp: &mut TcpStream,
-) -> Option<ClientResponse> {
+) -> Option<ClientResponse<'a>> {
     cache.buf.resize(1024, 0);
     if let Ok(Ok(len)) = time::timeout(Duration::from_millis(10), tcp.read(&mut cache.buf)).await {
         if len == 0 && is_eof(tcp).await {
             return None;
         }
         Some(ClientResponse::ReadPayload {
-            payload: Bytes::copy_from_slice(&cache.buf[0..len]),
+            payload: &cache.buf[0..len],
         })
     } else {
         cache.count_read += 1;
@@ -108,36 +109,31 @@ async fn client_process_read_payload(
         }
         if cache.count_send < 100 {
             cache.count_send += 1;
+            cache.msg = format!("packet {}", cache.count_send);
             Some(ClientResponse::Message {
-                msg: format!("packet {}", cache.count_send),
+                msg: cache.msg.as_ref(),
             })
         } else {
-            Some(ClientResponse::ReadPayload {
-                payload: Bytes::new(),
-            })
+            Some(ClientResponse::ReadPayload { payload: &[] })
         }
     }
 }
 
-async fn client_process_write_payload(
+async fn client_process_write_payload<'a>(
     tcp: &mut TcpStream,
-    payload: &Bytes,
-) -> Option<ClientResponse> {
+    payload: &[u8],
+) -> Option<ClientResponse<'a>> {
     tcp.write_all(payload).await.unwrap();
-    Some(ClientResponse::ReadPayload {
-        payload: Bytes::new(),
-    })
+    Some(ClientResponse::ReadPayload { payload: &[] })
 }
 
-async fn client_process_message(cache: &mut Cache, msg: &String) -> Option<ClientResponse> {
+async fn client_process_message<'a>(cache: &mut Cache, msg: &str) -> Option<ClientResponse<'a>> {
     dbg!(msg);
     cache.count_recv += 1;
     if cache.count_recv == 100 {
         None
     } else {
-        Some(ClientResponse::ReadPayload {
-            payload: Bytes::new(),
-        })
+        Some(ClientResponse::ReadPayload { payload: &[] })
     }
 }
 
@@ -167,10 +163,10 @@ async fn client_process(mut tcp: TcpStream) {
     }
 }
 
-async fn server_process_read_payload(
-    cache: &mut Cache,
+async fn server_process_read_payload<'a>(
+    cache: &'a mut Cache,
     tcp: &mut TcpStream,
-) -> Option<ServerResponse> {
+) -> Option<ServerResponse<'a>> {
     cache.buf.resize(1024, 0);
     let Ok(len) = tcp.read(&mut cache.buf).await else {
         return None;
@@ -179,26 +175,22 @@ async fn server_process_read_payload(
         None
     } else {
         Some(ServerResponse::ReadPayload {
-            payload: Bytes::copy_from_slice(&cache.buf[0..len]),
+            payload: &cache.buf[0..len],
         })
     }
 }
 
-async fn server_process_write_payload(
+async fn server_process_write_payload<'a>(
     tcp: &mut TcpStream,
-    payload: &Bytes,
-) -> Option<ServerResponse> {
+    payload: &[u8],
+) -> Option<ServerResponse<'a>> {
     tcp.write_all(payload).await.unwrap();
-    Some(ServerResponse::ReadPayload {
-        payload: Bytes::new(),
-    })
+    Some(ServerResponse::ReadPayload { payload: &[] })
 }
 
-async fn server_process_sleep(duration: Duration) -> Option<ServerResponse> {
+async fn server_process_sleep<'a>(duration: Duration) -> Option<ServerResponse<'a>> {
     time::sleep(duration).await;
-    Some(ServerResponse::ReadPayload {
-        payload: Bytes::new(),
-    })
+    Some(ServerResponse::ReadPayload { payload: &[] })
 }
 
 async fn server_process(mut tcp: TcpStream) {

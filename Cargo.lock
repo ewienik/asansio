@@ -71,7 +71,6 @@ dependencies = [
 name = "asansio"
 version = "0.1.0"
 dependencies = [
- "bytes",
  "clap",
  "tokio",
 ]
