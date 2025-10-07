@@ -194,10 +194,7 @@ pub struct IoRequest<'a, Request, Task> {
 impl<Request, Response> Io<Request, Response> {
     /// Starts the Sans part defined as a Future Task. Returns on the first async Request from Sans
     /// or when the Task finishes.
-    pub fn start<'a, 'b, Task>(
-        &'a self,
-        task: Pin<&'b mut Task>,
-    ) -> Option<IoRequest<'b, Request, Task>>
+    pub fn start<'a, Task>(&self, task: Pin<&'a mut Task>) -> Option<IoRequest<'a, Request, Task>>
     where
         Task: Future<Output = ()>,
     {
