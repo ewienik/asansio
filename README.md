@@ -1,5 +1,5 @@
 # asansio
-Async/await state machine for the sans-io design pattern.
+Async/await state machine for the Sans I/O design pattern.
 
 [![crates.io](https://img.shields.io/crates/v/asansio.svg)](https://crates.io/crates/asansio)
 [![docs.rs](https://img.shields.io/docsrs/asansio/latest)](https://docs.rs/asansio)
@@ -51,6 +51,14 @@ assert_eq!(request.request().unwrap().0, [3; 10]);
 response_buf.fill(4);
 assert!(io.handle(request, &Response(&response_buf)).is_none());
 ```
+
+The crate divides a problem into two parts. The first `Sans` takes care of the
+state machine independent of the I/O and the second `Io` is responsible with
+I/O communication.  These two parts communicate using `Request` and `Respond`
+types, which are defined by the user (for real scenarios they could be
+`enums`).
+
+See also more [examples](examples).
 
 ## License
 
