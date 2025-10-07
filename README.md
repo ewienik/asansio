@@ -1,6 +1,9 @@
 # asansio
 Async/await state machine for the sans-io design pattern.
 
+[![crates.io](https://img.shields.io/crates/v/asansio.svg)](https://crates.io/crates/asansio)
+[![docs.rs](https://img.shields.io/docsrs/asansio/latest)](https://docs.rs/asansio)
+
 ## The Idea
 
 This crate is a experiment for Sans I/O in Rust (see [sans I/O for network
