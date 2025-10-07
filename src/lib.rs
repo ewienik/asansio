@@ -34,23 +34,19 @@
 //!     assert_eq!(response.response().unwrap().0, [4; 20]);
 //! }
 //!
-//! fn run() {
-//!     let (sans, io) = asansio::new();
+//! let (sans, io) = asansio::new();
 //!
-//!     let task = pin!(sans_task(sans));
+//! let task = pin!(sans_task(sans));
 //!
-//!     let request = io.start(task).unwrap();
-//!     assert_eq!(request.request().unwrap().0, [1; 10]);
+//! let request = io.start(task).unwrap();
+//! assert_eq!(request.request().unwrap().0, [1; 10]);
 //!
-//!     let mut response_buf = [2; 20];
-//!     let request = io.handle(request, &Response(&response_buf)).unwrap();
-//!     assert_eq!(request.request().unwrap().0, [3; 10]);
+//! let mut response_buf = [2; 20];
+//! let request = io.handle(request, &Response(&response_buf)).unwrap();
+//! assert_eq!(request.request().unwrap().0, [3; 10]);
 //!
-//!     response_buf.fill(4);
-//!     let request = io.handle(request, &Response(&response_buf)).unwrap();
-//!     assert_eq!(request.request().unwrap().0, [5; 10]);
-//! }
-//!
+//! response_buf.fill(4);
+//! assert!(io.handle(request, &Response(&response_buf)).is_none());
 //! ```
 //!
 //! This crate divides a problem into two parts. The first `Sans` takes care of the state machine

@@ -18,6 +18,37 @@ It is `no_std` crate without allocations on the heap. It depends only on the
 `core`, no other crates. Only examples uses `std`, `clap` and `tokio` as
 `dev-dependencies`.
 
+## Usage
+
+```rust
+struct Request<'a>(&'a [u8]);
+struct Response<'a>(&'a [u8]);
+
+async fn sans_task<'a>(sans: Sans<Request<'a>, Response<'a>>) {
+    let mut request_buf = [1u8; 10];
+    let response = sans.start(&Request(&request_buf)).await;
+    assert_eq!(response.response().unwrap().0, [2; 20]);
+
+    request_buf.fill(3);
+    let response = sans.handle(response, &Request(&request_buf)).await;
+    assert_eq!(response.response().unwrap().0, [4; 20]);
+}
+
+let (sans, io) = asansio::new();
+
+let task = pin!(sans_task(sans));
+
+let request = io.start(task).unwrap();
+assert_eq!(request.request().unwrap().0, [1; 10]);
+
+let mut response_buf = [2; 20];
+let request = io.handle(request, &Response(&response_buf)).unwrap();
+assert_eq!(request.request().unwrap().0, [3; 10]);
+
+response_buf.fill(4);
+assert!(io.handle(request, &Response(&response_buf)).is_none());
+```
+
 ## License
 
 Licensed under either of
