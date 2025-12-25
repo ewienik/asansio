@@ -99,12 +99,12 @@ impl<Request, Response> Channel<Request, Response> {
 }
 
 /// The Future helper for handling data between Io and Sans
-pub struct SansHandle<'a, Request, Response> {
+struct SansFuture<'a, Request, Response> {
     request: Option<&'a Request>,
     _response: PhantomData<Response>,
 }
 
-impl<'a, Request: Unpin, Response: Unpin> Future for SansHandle<'a, Request, Response> {
+impl<'a, Request: Unpin, Response: Unpin> Future for SansFuture<'a, Request, Response> {
     type Output = SansResponse<Response>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -144,10 +144,10 @@ pub struct SansResponse<Response> {
 // It is safe as its lifetime is between two awaits in the Sans part
 unsafe impl<Response> Send for SansResponse<Response> {}
 
-impl<Request, Response> Sans<Request, Response> {
+impl<Request: Unpin, Response: Unpin> Sans<Request, Response> {
     /// Initial request from the Sans part.
-    pub fn start<'a>(&self, request: &'a Request) -> SansHandle<'a, Request, Response> {
-        SansHandle {
+    pub fn start<'a>(&self, request: &'a Request) -> impl Future<Output = SansResponse<Response>> {
+        SansFuture {
             request: Some(request),
             _response: PhantomData,
         }
@@ -159,8 +159,8 @@ impl<Request, Response> Sans<Request, Response> {
         &self,
         _response: SansResponse<Response>,
         request: &'a Request,
-    ) -> SansHandle<'a, Request, Response> {
-        SansHandle {
+    ) -> impl Future<Output = SansResponse<Response>> {
+        SansFuture {
             request: Some(request),
             _response: PhantomData,
         }
