@@ -60,15 +60,15 @@ fn client_sleep<'a>(cache: &'a mut Cache, duration: Duration) -> ClientRequest<'
 pub async fn run_client<'a>(sans: Sans<ClientRequest<'a>, ClientResponse<'a>>) {
     let mut cache = Cache::new();
 
-    let mut sans_resp = sans.start(&ClientRequest::Ready).await;
+    let mut sans_handle = sans.start(&ClientRequest::Ready).await;
     loop {
-        let request = match sans_resp.response() {
+        let request = match sans_handle.response() {
             Some(ClientResponse::ReadMessage { payload }) => client_read_message(payload),
             Some(ClientResponse::Message { msg }) => client_message(msg),
             Some(ClientResponse::Sleep { duration }) => client_sleep(&mut cache, *duration),
             None => break,
         };
-        sans_resp = sans.handle(sans_resp, &request).await;
+        sans_handle = sans.handle(sans_handle, &request).await;
     }
 }
 
@@ -94,15 +94,15 @@ fn server_read_sleep<'a>(payload: &[u8]) -> ServerRequest<'a> {
 pub async fn run_server<'a>(sans: Sans<ServerRequest<'a>, ServerResponse<'a>>) {
     let mut cache = Cache::new();
 
-    let mut sans_resp = sans.start(&ServerRequest::Read).await;
+    let mut sans_handle = sans.start(&ServerRequest::Read).await;
     loop {
-        let request = match sans_resp.response() {
+        let request = match sans_handle.response() {
             Some(ServerResponse::ReadMessage { payload }) => {
                 server_read_message(&mut cache, payload)
             }
             Some(ServerResponse::ReadSleep { payload }) => server_read_sleep(payload),
             None => break,
         };
-        sans_resp = sans.handle(sans_resp, &request).await;
+        sans_handle = sans.handle(sans_handle, &request).await;
     }
 }

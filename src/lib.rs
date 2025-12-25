@@ -26,12 +26,12 @@
 //!
 //! async fn sans_task<'a>(sans: Sans<Request<'a>, Response<'a>>) {
 //!     let mut request_buf = [1u8; 10];
-//!     let response = sans.start(&Request(&request_buf)).await;
-//!     assert_eq!(response.response().unwrap().0, [2; 20]);
+//!     let handle = sans.start(&Request(&request_buf)).await;
+//!     assert_eq!(handle.response().unwrap().0, [2; 20]);
 //!
 //!     request_buf.fill(3);
-//!     let response = sans.handle(response, &Request(&request_buf)).await;
-//!     assert_eq!(response.response().unwrap().0, [4; 20]);
+//!     let handle = sans.handle(handle, &Request(&request_buf)).await;
+//!     assert_eq!(handle.response().unwrap().0, [4; 20]);
 //! }
 //!
 //! let (sans, io) = asansio::new();
@@ -56,16 +56,16 @@
 //! (for real scenarios they could be `enums`).
 //!
 //! `Sans` starts communicating with `Io` using [Sans::start] and providing the initial `Request`;
-//! it returns the [SansResponse] from the `Io`.  `Io` starts sans task by using [Io::start] which
+//! it returns the [SansHandle] from the `Io`.  `Io` starts sans task by using [Io::start] which
 //! returns [IoRequest] from `Sans`. The later communication is done using [Sans::handle] and
-//! [Io::handle], which consume [SansResponse] and [IoRequest].
+//! [Io::handle], which consume [SansHandle] and [IoRequest].
 //!
 //! See also more [examples](https://github.com/ewienik/asansio/tree/master/examples).
 //!
 //! ## Safety
 //!
 //! The crate uses `unsafe` parts for preparing a proper `async/await` infrastructure. Safety is
-//! guaranteed by consuming the latest [IoRequest] and [SansResponse] - these handlers store
+//! guaranteed by consuming the latest [IoRequest] and [SansHandle] - these handlers store
 //! `Request` and `Response` objects and their lifetime is limited to the adjecent calls.
 
 #![no_std]
@@ -105,7 +105,7 @@ struct SansFuture<'a, Request, Response> {
 }
 
 impl<'a, Request: Unpin, Response: Unpin> Future for SansFuture<'a, Request, Response> {
-    type Output = SansResponse<Response>;
+    type Output = SansHandle<Response>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let waker = cx.waker();
@@ -120,7 +120,7 @@ impl<'a, Request: Unpin, Response: Unpin> Future for SansFuture<'a, Request, Res
             Poll::Pending
         } else {
             match ch {
-                Channel::Rx(response) => Poll::Ready(SansResponse {
+                Channel::Rx(response) => Poll::Ready(SansHandle {
                     response: *response,
                 }),
                 Channel::Tx(_) => Poll::Pending,
@@ -137,29 +137,29 @@ pub struct Sans<Request, Response> {
 }
 
 /// The holder of the Response from the Io to Sans
-pub struct SansResponse<Response> {
+pub struct SansHandle<Response> {
     response: *const Response,
 }
 
 // It is safe as its lifetime is between two awaits in the Sans part
-unsafe impl<Response> Send for SansResponse<Response> {}
+unsafe impl<Response> Send for SansHandle<Response> {}
 
 impl<Request: Unpin, Response: Unpin> Sans<Request, Response> {
     /// Initial request from the Sans part.
-    pub fn start<'a>(&self, request: &'a Request) -> impl Future<Output = SansResponse<Response>> {
+    pub fn start<'a>(&self, request: &'a Request) -> impl Future<Output = SansHandle<Response>> {
         SansFuture {
             request: Some(request),
             _response: PhantomData,
         }
     }
 
-    /// Next requests from the Sans part. It must receive SansResponse from the previous await call
+    /// Next requests from the Sans part. It must receive SansHandle from the previous await call
     /// as the Response is not longer valid.
     pub fn handle<'a>(
         &self,
-        _response: SansResponse<Response>,
+        _response: SansHandle<Response>,
         request: &'a Request,
-    ) -> impl Future<Output = SansResponse<Response>> {
+    ) -> impl Future<Output = SansHandle<Response>> {
         SansFuture {
             request: Some(request),
             _response: PhantomData,
@@ -167,14 +167,14 @@ impl<Request: Unpin, Response: Unpin> Sans<Request, Response> {
     }
 }
 
-impl<Response> SansResponse<Response> {
+impl<Response> SansHandle<Response> {
     /// Retrieve a reference to the Response from the Io part.
     pub fn response(&self) -> Option<&Response> {
         if self.response.is_null() {
             return None;
         }
 
-        // It is save as SansResponse is used only between two adjacent await points
+        // It is save as SansHandle is used only between two adjacent await points
         Some(unsafe { &*self.response })
     }
 }

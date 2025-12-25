@@ -19,8 +19,8 @@ fn single_call() {
     let (sans, io) = asansio::new::<Request, Response>();
 
     let task = pin!(async {
-        let response = sans.start(&Request).await;
-        assert!(matches!(response.response(), Some(&Response)));
+        let handle = sans.start(&Request).await;
+        assert!(matches!(handle.response(), Some(&Response)));
     });
 
     let request = io.start(task).unwrap();
@@ -37,13 +37,13 @@ fn send_owned_payload() {
     let (sans, io) = asansio::new::<Request, Response>();
 
     let task = pin!(async {
-        let response = sans.start(&Request([1; 10])).await;
-        assert!(matches!(response.response(), Some(&Response(_))));
-        assert_eq!(response.response().unwrap().0, [2; 20]);
+        let handle = sans.start(&Request([1; 10])).await;
+        assert!(matches!(handle.response(), Some(&Response(_))));
+        assert_eq!(handle.response().unwrap().0, [2; 20]);
 
-        let response = sans.handle(response, &Request([3; 10])).await;
-        assert!(matches!(response.response(), Some(&Response(_))));
-        assert_eq!(response.response().unwrap().0, [4; 20]);
+        let handle = sans.handle(handle, &Request([3; 10])).await;
+        assert!(matches!(handle.response(), Some(&Response(_))));
+        assert_eq!(handle.response().unwrap().0, [4; 20]);
     });
 
     let request = io.start(task).unwrap();
@@ -68,22 +68,22 @@ fn send_borrowed_payload() {
         let mut request_buf = vec![0u8; 10];
 
         request_buf.fill(1);
-        let response = sans.start(&Request(&request_buf)).await;
-        assert!(matches!(response.response(), Some(&Response(_))));
-        assert_eq!(response.response().unwrap().0, [2; 20]);
+        let handle = sans.start(&Request(&request_buf)).await;
+        assert!(matches!(handle.response(), Some(&Response(_))));
+        assert_eq!(handle.response().unwrap().0, [2; 20]);
 
         request_buf.fill(3);
-        let response = sans.handle(response, &Request(&request_buf)).await;
-        assert!(matches!(response.response(), Some(&Response(_))));
-        assert_eq!(response.response().unwrap().0, [4; 20]);
+        let handle = sans.handle(handle, &Request(&request_buf)).await;
+        assert!(matches!(handle.response(), Some(&Response(_))));
+        assert_eq!(handle.response().unwrap().0, [4; 20]);
 
         drop(request_buf);
         let mut request_buf = vec![0u8; 10];
 
         request_buf.fill(5);
-        let response = sans.handle(response, &Request(&request_buf)).await;
-        assert!(matches!(response.response(), Some(&Response(_))));
-        assert_eq!(response.response().unwrap().0, [6; 20]);
+        let handle = sans.handle(handle, &Request(&request_buf)).await;
+        assert!(matches!(handle.response(), Some(&Response(_))));
+        assert_eq!(handle.response().unwrap().0, [6; 20]);
     });
 
     let request = io.start(task).unwrap();

@@ -29,12 +29,12 @@ struct Response<'a>(&'a [u8]);
 
 async fn sans_task<'a>(sans: Sans<Request<'a>, Response<'a>>) {
     let mut request_buf = [1u8; 10];
-    let response = sans.start(&Request(&request_buf)).await;
-    assert_eq!(response.response().unwrap().0, [2; 20]);
+    let handle = sans.start(&Request(&request_buf)).await;
+    assert_eq!(handle.response().unwrap().0, [2; 20]);
 
     request_buf.fill(3);
-    let response = sans.handle(response, &Request(&request_buf)).await;
-    assert_eq!(response.response().unwrap().0, [4; 20]);
+    let handle = sans.handle(handle, &Request(&request_buf)).await;
+    assert_eq!(handle.response().unwrap().0, [4; 20]);
 }
 
 let (sans, io) = asansio::new();
