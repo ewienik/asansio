@@ -109,7 +109,7 @@ fn client_process(mut tcp: TcpStream) {
 
     let mut handle = io.start(task);
     while handle.is_some() {
-        let response = match handle.as_ref().unwrap().request() {
+        let response = match handle.as_ref().unwrap().message() {
             Some(ClientRequest::ReadPayload) => client_process_read_payload(&mut cache, &mut tcp),
             Some(ClientRequest::WritePayload { payload }) => {
                 client_process_write_payload(&mut tcp, payload)

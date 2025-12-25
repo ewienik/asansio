@@ -62,7 +62,7 @@ pub async fn run_client<'a>(sans: Sans<ClientRequest<'a>, ClientResponse<'a>>) {
 
     let mut sans_handle = sans.start(&ClientRequest::Ready).await;
     loop {
-        let request = match sans_handle.response() {
+        let request = match sans_handle.message() {
             Some(ClientResponse::ReadMessage { payload }) => client_read_message(payload),
             Some(ClientResponse::Message { msg }) => client_message(msg),
             Some(ClientResponse::Sleep { duration }) => client_sleep(&mut cache, *duration),
@@ -96,7 +96,7 @@ pub async fn run_server<'a>(sans: Sans<ServerRequest<'a>, ServerResponse<'a>>) {
 
     let mut sans_handle = sans.start(&ServerRequest::Read).await;
     loop {
-        let request = match sans_handle.response() {
+        let request = match sans_handle.message() {
             Some(ServerResponse::ReadMessage { payload }) => {
                 server_read_message(&mut cache, payload)
             }

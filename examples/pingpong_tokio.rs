@@ -145,7 +145,7 @@ async fn client_process(mut tcp: TcpStream) {
 
     let mut handle = io.start(task);
     while handle.is_some() {
-        let response = match handle.as_ref().unwrap().request() {
+        let response = match handle.as_ref().unwrap().message() {
             Some(ClientRequest::ReadPayload) => {
                 client_process_read_payload(&mut cache, &mut tcp).await
             }
@@ -201,7 +201,7 @@ async fn server_process(mut tcp: TcpStream) {
 
     let mut request = io.start(task);
     while request.is_some() {
-        let response = match request.as_ref().unwrap().request() {
+        let response = match request.as_ref().unwrap().message() {
             Some(ServerRequest::ReadPayload) => {
                 server_process_read_payload(&mut cache, &mut tcp).await
             }

@@ -27,11 +27,11 @@
 //! async fn sans_task<'a>(sans: Sans<Request<'a>, Response<'a>>) {
 //!     let mut request_buf = [1u8; 10];
 //!     let handle = sans.start(&Request(&request_buf)).await;
-//!     assert_eq!(handle.response().unwrap().0, [2; 20]);
+//!     assert_eq!(handle.message().unwrap().0, [2; 20]);
 //!
 //!     request_buf.fill(3);
 //!     let handle = sans.handle(handle, &Request(&request_buf)).await;
-//!     assert_eq!(handle.response().unwrap().0, [4; 20]);
+//!     assert_eq!(handle.message().unwrap().0, [4; 20]);
 //! }
 //!
 //! let (sans, io) = asansio::new();
@@ -39,11 +39,11 @@
 //! let task = pin!(sans_task(sans));
 //!
 //! let handle = io.start(task).unwrap();
-//! assert_eq!(handle.request().unwrap().0, [1; 10]);
+//! assert_eq!(handle.message().unwrap().0, [1; 10]);
 //!
 //! let mut response_buf = [2; 20];
 //! let handle = io.handle(handle, &Response(&response_buf)).unwrap();
-//! assert_eq!(handle.request().unwrap().0, [3; 10]);
+//! assert_eq!(handle.message().unwrap().0, [3; 10]);
 //!
 //! response_buf.fill(4);
 //! assert!(io.handle(handle, &Response(&response_buf)).is_none());
@@ -169,7 +169,7 @@ impl<Request: Unpin, Response: Unpin> Sans<Request, Response> {
 
 impl<Response> SansHandle<Response> {
     /// Retrieve a reference to the Response from the Io part.
-    pub fn response(&self) -> Option<&Response> {
+    pub fn message(&self) -> Option<&Response> {
         if self.response.is_null() {
             return None;
         }
@@ -227,7 +227,7 @@ where
     Task: Future<Output = ()>,
 {
     /// Retrieve a reference to the Request from the Sans part.
-    pub fn request(&self) -> Option<&Request> {
+    pub fn message(&self) -> Option<&Request> {
         self.request
     }
 
