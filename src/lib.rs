@@ -38,15 +38,15 @@
 //!
 //! let task = pin!(sans_task(sans));
 //!
-//! let request = io.start(task).unwrap();
-//! assert_eq!(request.request().unwrap().0, [1; 10]);
+//! let handle = io.start(task).unwrap();
+//! assert_eq!(handle.request().unwrap().0, [1; 10]);
 //!
 //! let mut response_buf = [2; 20];
-//! let request = io.handle(request, &Response(&response_buf)).unwrap();
-//! assert_eq!(request.request().unwrap().0, [3; 10]);
+//! let handle = io.handle(handle, &Response(&response_buf)).unwrap();
+//! assert_eq!(handle.request().unwrap().0, [3; 10]);
 //!
 //! response_buf.fill(4);
-//! assert!(io.handle(request, &Response(&response_buf)).is_none());
+//! assert!(io.handle(handle, &Response(&response_buf)).is_none());
 //! ```
 //!
 //! This crate divides a problem into two parts. The first `Sans` takes care of the state machine
@@ -57,15 +57,15 @@
 //!
 //! `Sans` starts communicating with `Io` using [Sans::start] and providing the initial `Request`;
 //! it returns the [SansHandle] from the `Io`.  `Io` starts sans task by using [Io::start] which
-//! returns [IoRequest] from `Sans`. The later communication is done using [Sans::handle] and
-//! [Io::handle], which consume [SansHandle] and [IoRequest].
+//! returns [IoHandle] from `Sans`. The later communication is done using [Sans::handle] and
+//! [Io::handle], which consume [SansHandle] and [IoHandle].
 //!
 //! See also more [examples](https://github.com/ewienik/asansio/tree/master/examples).
 //!
 //! ## Safety
 //!
 //! The crate uses `unsafe` parts for preparing a proper `async/await` infrastructure. Safety is
-//! guaranteed by consuming the latest [IoRequest] and [SansHandle] - these handlers store
+//! guaranteed by consuming the latest [IoHandle] and [SansHandle] - these handlers store
 //! `Request` and `Response` objects and their lifetime is limited to the adjecent calls.
 
 #![no_std]
@@ -186,7 +186,7 @@ pub struct Io<Request, Response> {
 }
 
 /// The holder of the Request from the Sans to Io
-pub struct IoRequest<'a, Request, Task> {
+pub struct IoHandle<'a, Request, Task> {
     request: Option<&'a Request>,
     task: Pin<&'a mut Task>,
 }
@@ -194,11 +194,11 @@ pub struct IoRequest<'a, Request, Task> {
 impl<Request, Response> Io<Request, Response> {
     /// Starts the Sans part defined as a Future Task. Returns on the first async Request from Sans
     /// or when the Task finishes.
-    pub fn start<'a, Task>(&self, task: Pin<&'a mut Task>) -> Option<IoRequest<'a, Request, Task>>
+    pub fn start<'a, Task>(&self, task: Pin<&'a mut Task>) -> Option<IoHandle<'a, Request, Task>>
     where
         Task: Future<Output = ()>,
     {
-        let mut handler = IoRequest {
+        let mut handler = IoHandle {
             request: None,
             task,
         };
@@ -206,14 +206,14 @@ impl<Request, Response> Io<Request, Response> {
         handler.request.map(|_| handler)
     }
 
-    /// Next polling of the Future Task of the Sans part. It must receive IoRequest from the
+    /// Next polling of the Future Task of the Sans part. It must receive IoHandle from the
     /// previous await call as the Response is not longer valid. Returns on the Request from Sans
     /// or when the Task finishes.
     pub fn handle<'a, Task>(
         &self,
-        mut handler: IoRequest<'a, Request, Task>,
+        mut handler: IoHandle<'a, Request, Task>,
         response: &Response,
-    ) -> Option<IoRequest<'a, Request, Task>>
+    ) -> Option<IoHandle<'a, Request, Task>>
     where
         Task: Future<Output = ()>,
     {
@@ -222,7 +222,7 @@ impl<Request, Response> Io<Request, Response> {
     }
 }
 
-impl<'a, Request, Task> IoRequest<'a, Request, Task>
+impl<'a, Request, Task> IoHandle<'a, Request, Task>
 where
     Task: Future<Output = ()>,
 {
@@ -232,7 +232,7 @@ where
     }
 
     fn run_async<Response>(&mut self, ch: Channel<Request, Response>) {
-        // It is safe as now there is no valid Request waiting (IoRequest was consumed)
+        // It is safe as now there is no valid Request waiting (IoHandle was consumed)
         let waker = unsafe { Waker::new(&ch as *const _ as *const (), &WAKER_VTABLE) };
 
         let mut cx = Context::from_waker(&waker);
@@ -243,7 +243,7 @@ where
                     unreachable!();
                 };
 
-                // It is safe as this will be the only one IoRequest and it will be consumed by the
+                // It is safe as this will be the only one IoHandle and it will be consumed by the
                 // next handle call
                 Some(unsafe { &*request })
             }

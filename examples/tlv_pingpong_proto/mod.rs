@@ -94,12 +94,12 @@ pub async fn run_client<'a>(sans: Sans<ClientRequest<'a>, ClientResponse<'a>>) {
     let (tlv_sans, tlv_io) = asansio::new();
     let tlv_task = pin!(tlv_proto::run_client(tlv_sans));
 
-    let mut pp_io_request = pp_io.start(pp_task);
-    if pp_io_request.is_none() {
+    let mut pp_io_handle = pp_io.start(pp_task);
+    if pp_io_handle.is_none() {
         return;
     }
-    let mut tlv_io_request = tlv_io.start(tlv_task);
-    if tlv_io_request.is_none() {
+    let mut tlv_io_handle = tlv_io.start(tlv_task);
+    if tlv_io_handle.is_none() {
         return;
     };
 
@@ -108,19 +108,19 @@ pub async fn run_client<'a>(sans: Sans<ClientRequest<'a>, ClientResponse<'a>>) {
     loop {
         client = match client {
             Some(Client::Tlv(response)) => {
-                tlv_io_request = tlv_io.handle(tlv_io_request.take().unwrap(), &response);
-                if tlv_io_request.is_none() {
+                tlv_io_handle = tlv_io.handle(tlv_io_handle.take().unwrap(), &response);
+                if tlv_io_handle.is_none() {
                     return;
                 };
-                client_tlv_request(tlv_io_request.as_ref().unwrap().request())
+                client_tlv_request(tlv_io_handle.as_ref().unwrap().request())
             }
 
             Some(Client::Pp(response)) => {
-                pp_io_request = pp_io.handle(pp_io_request.take().unwrap(), &response);
-                if pp_io_request.is_none() {
+                pp_io_handle = pp_io.handle(pp_io_handle.take().unwrap(), &response);
+                if pp_io_handle.is_none() {
                     return;
                 };
-                client_pp_request(pp_io_request.as_ref().unwrap().request())
+                client_pp_request(pp_io_handle.as_ref().unwrap().request())
             }
 
             Some(Client::Request(request)) => {
@@ -181,12 +181,12 @@ pub async fn run_server<'a>(sans: Sans<ServerRequest<'a>, ServerResponse<'a>>) {
     let (tlv_sans, tlv_io) = asansio::new();
     let tlv_task = pin!(tlv_proto::run_server(tlv_sans));
 
-    let mut pp_io_request = pp_io.start(pp_task);
-    if pp_io_request.is_none() {
+    let mut pp_io_handle = pp_io.start(pp_task);
+    if pp_io_handle.is_none() {
         return;
     }
-    let mut tlv_io_request = tlv_io.start(tlv_task);
-    if tlv_io_request.is_none() {
+    let mut tlv_io_handle = tlv_io.start(tlv_task);
+    if tlv_io_handle.is_none() {
         return;
     };
 
@@ -195,19 +195,19 @@ pub async fn run_server<'a>(sans: Sans<ServerRequest<'a>, ServerResponse<'a>>) {
     loop {
         server = match server {
             Some(Server::Tlv(response)) => {
-                tlv_io_request = tlv_io.handle(tlv_io_request.take().unwrap(), &response);
-                if tlv_io_request.is_none() {
+                tlv_io_handle = tlv_io.handle(tlv_io_handle.take().unwrap(), &response);
+                if tlv_io_handle.is_none() {
                     return;
                 };
-                server_tlv_request(tlv_io_request.as_ref().unwrap().request())
+                server_tlv_request(tlv_io_handle.as_ref().unwrap().request())
             }
 
             Some(Server::Pp(response)) => {
-                pp_io_request = pp_io.handle(pp_io_request.take().unwrap(), &response);
-                if pp_io_request.is_none() {
+                pp_io_handle = pp_io.handle(pp_io_handle.take().unwrap(), &response);
+                if pp_io_handle.is_none() {
                     return;
                 };
-                server_pp_request(pp_io_request.as_ref().unwrap().request())
+                server_pp_request(pp_io_handle.as_ref().unwrap().request())
             }
 
             Some(Server::Request(request)) => {

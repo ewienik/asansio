@@ -107,9 +107,9 @@ fn client_process(mut tcp: TcpStream) {
     let (sans, io) = asansio::new();
     let task = pin!(tlv_pingpong_proto::run_client(sans));
 
-    let mut request = io.start(task);
-    while request.is_some() {
-        let response = match request.as_ref().unwrap().request() {
+    let mut handle = io.start(task);
+    while handle.is_some() {
+        let response = match handle.as_ref().unwrap().request() {
             Some(ClientRequest::ReadPayload) => client_process_read_payload(&mut cache, &mut tcp),
             Some(ClientRequest::WritePayload { payload }) => {
                 client_process_write_payload(&mut tcp, payload)
@@ -121,6 +121,6 @@ fn client_process(mut tcp: TcpStream) {
         let Some(response) = response else {
             break;
         };
-        request = io.handle(request.take().unwrap(), &response);
+        handle = io.handle(handle.take().unwrap(), &response);
     }
 }
