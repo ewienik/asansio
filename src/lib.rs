@@ -142,7 +142,7 @@ pub struct SansHandle<Response> {
 }
 
 // It is safe as its lifetime is between two awaits in the Sans part
-unsafe impl<Response> Send for SansHandle<Response> {}
+unsafe impl<Response> Send for SansHandle<Response> where for<'a> &'a Response: Send {}
 
 impl<Request: Unpin, Response: Unpin> Sans<Request, Response> {
     /// Initial request from the Sans part.
