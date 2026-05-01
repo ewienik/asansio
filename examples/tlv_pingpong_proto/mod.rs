@@ -103,7 +103,7 @@ pub async fn run_client<'a>(sans: Sans<ClientRequest<'a>, ClientResponse<'a>>) {
         return;
     };
 
-    let mut sans_handle = sans.start(&ClientRequest::ReadPayload).await;
+    let mut sans_handle = sans.handle(&ClientRequest::ReadPayload).await;
     let mut client = client_response(sans_handle.message());
     loop {
         client = match client {
@@ -124,7 +124,7 @@ pub async fn run_client<'a>(sans: Sans<ClientRequest<'a>, ClientResponse<'a>>) {
             }
 
             Some(Client::Request(request)) => {
-                sans_handle = sans.handle(sans_handle, &request).await;
+                sans_handle = sans.handle(&request).await;
                 client_response(sans_handle.message())
             }
 
@@ -190,7 +190,7 @@ pub async fn run_server<'a>(sans: Sans<ServerRequest<'a>, ServerResponse<'a>>) {
         return;
     };
 
-    let mut sans_handle = sans.start(&ServerRequest::ReadPayload).await;
+    let mut sans_handle = sans.handle(&ServerRequest::ReadPayload).await;
     let mut server = server_response(sans_handle.message());
     loop {
         server = match server {
@@ -211,7 +211,7 @@ pub async fn run_server<'a>(sans: Sans<ServerRequest<'a>, ServerResponse<'a>>) {
             }
 
             Some(Server::Request(request)) => {
-                sans_handle = sans.handle(sans_handle, &request).await;
+                sans_handle = sans.handle(&request).await;
                 server_response(sans_handle.message())
             }
 

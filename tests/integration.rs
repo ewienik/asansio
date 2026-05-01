@@ -1,5 +1,4 @@
 use asansio::Sans;
-use asansio::SansHandle;
 use core::cell::RefCell;
 use core::pin::pin;
 use std::rc::Rc;
@@ -24,7 +23,7 @@ fn single_call() {
     let (sans, io) = asansio::new::<Request, Response>();
 
     let task = pin!(async {
-        let handle = sans.start(&Request).await;
+        let handle = sans.handle(&Request).await;
         assert!(matches!(handle.message(), Some(&Response)));
     });
 
@@ -42,11 +41,11 @@ fn send_owned_payload() {
     let (sans, io) = asansio::new::<Request, Response>();
 
     let task = pin!(async {
-        let handle = sans.start(&Request([1; 10])).await;
+        let handle = sans.handle(&Request([1; 10])).await;
         assert!(matches!(handle.message(), Some(&Response(_))));
         assert_eq!(handle.message().unwrap().0, [2; 20]);
 
-        let handle = sans.handle(handle, &Request([3; 10])).await;
+        let handle = sans.handle(&Request([3; 10])).await;
         assert!(matches!(handle.message(), Some(&Response(_))));
         assert_eq!(handle.message().unwrap().0, [4; 20]);
     });
@@ -73,12 +72,12 @@ fn send_borrowed_payload() {
         let mut request_buf = vec![0u8; 10];
 
         request_buf.fill(1);
-        let handle = sans.start(&Request(&request_buf)).await;
+        let handle = sans.handle(&Request(&request_buf)).await;
         assert!(matches!(handle.message(), Some(&Response(_))));
         assert_eq!(handle.message().unwrap().0, [2; 20]);
 
         request_buf.fill(3);
-        let handle = sans.handle(handle, &Request(&request_buf)).await;
+        let handle = sans.handle(&Request(&request_buf)).await;
         assert!(matches!(handle.message(), Some(&Response(_))));
         assert_eq!(handle.message().unwrap().0, [4; 20]);
 
@@ -86,7 +85,7 @@ fn send_borrowed_payload() {
         let mut request_buf = vec![0u8; 10];
 
         request_buf.fill(5);
-        let handle = sans.handle(handle, &Request(&request_buf)).await;
+        let handle = sans.handle(&Request(&request_buf)).await;
         assert!(matches!(handle.message(), Some(&Response(_))));
         assert_eq!(handle.message().unwrap().0, [6; 20]);
     });
@@ -134,32 +133,19 @@ enum ProtocolResponse {
 struct ProtocolSync {
     buffer: Rc<RefCell<Vec<u8>>>,
     sans: Sans<ProtocolRequest, ProtocolResponse>,
-    handle: Option<SansHandle<ProtocolResponse>>,
 }
 
 impl ProtocolSync {
     fn new(buffer: Rc<RefCell<Vec<u8>>>, sans: Sans<ProtocolRequest, ProtocolResponse>) -> Self {
-        Self {
-            buffer,
-            sans,
-            handle: None,
-        }
+        Self { buffer, sans }
     }
 }
 
 impl Protocol for ProtocolSync {
     async fn alloc(&mut self, size: usize) -> Box<[u8]> {
         loop {
-            let handle = if let Some(handle) = self.handle.take() {
-                self.sans.handle(handle, &ProtocolRequest::Alloc).await
-            } else {
-                self.sans.start(&ProtocolRequest::Alloc).await
-            };
-            self.handle.replace(handle);
-            if matches!(
-                self.handle.as_ref().unwrap().message(),
-                Some(ProtocolResponse::Done)
-            ) {
+            let handle = self.sans.handle(&ProtocolRequest::Alloc).await;
+            if matches!(handle.message(), Some(ProtocolResponse::Done)) {
                 break;
             }
         }
@@ -173,16 +159,8 @@ impl Protocol for ProtocolSync {
             buffer.extend_from_slice(buf);
         }
         loop {
-            let handle = if let Some(handle) = self.handle.take() {
-                self.sans.handle(handle, &ProtocolRequest::Send).await
-            } else {
-                self.sans.start(&ProtocolRequest::Send).await
-            };
-            self.handle.replace(handle);
-            if matches!(
-                self.handle.as_ref().unwrap().message(),
-                Some(ProtocolResponse::Done)
-            ) {
+            let handle = self.sans.handle(&ProtocolRequest::Send).await;
+            if matches!(handle.message(), Some(ProtocolResponse::Done)) {
                 break;
             }
         }
@@ -192,16 +170,8 @@ impl Protocol for ProtocolSync {
     async fn recv(&mut self, buf: &mut [u8]) -> usize {
         self.buffer.borrow_mut().clear();
         loop {
-            let handle = if let Some(handle) = self.handle.take() {
-                self.sans.handle(handle, &ProtocolRequest::Recv).await
-            } else {
-                self.sans.start(&ProtocolRequest::Recv).await
-            };
-            self.handle.replace(handle);
-            if matches!(
-                self.handle.as_ref().unwrap().message(),
-                Some(ProtocolResponse::Done)
-            ) {
+            let handle = self.sans.handle(&ProtocolRequest::Recv).await;
+            if matches!(handle.message(), Some(ProtocolResponse::Done)) {
                 break;
             }
         }
@@ -256,13 +226,13 @@ async fn run(mut proto: impl Protocol) {
     assert_eq!(proto.send(&buffer).await, 2);
 
     assert_eq!(proto.recv(&mut buffer).await, 2);
-    assert_eq!(buffer.iter().as_slice(), [b'b', b'b']);
+    assert_eq!(buffer.iter().as_slice(), *b"bb");
 
     buffer.fill(b'c');
     assert_eq!(proto.send(&buffer).await, 2);
 
     assert_eq!(proto.recv(&mut buffer).await, 2);
-    assert_eq!(buffer.iter().as_slice(), [b'd', b'd']);
+    assert_eq!(buffer.iter().as_slice(), *b"dd");
 }
 
 #[test]
@@ -281,11 +251,11 @@ fn simple_protocol_sync() {
 
     let handle = io.handle(handle, &ProtocolResponse::Done).unwrap();
     assert!(matches!(handle.message(), Some(&ProtocolRequest::Send)));
-    assert_eq!(buffer.borrow().as_slice(), [b'a', b'a']);
+    assert_eq!(buffer.borrow().as_slice(), *b"aa");
 
     let handle = io.handle(handle, &ProtocolResponse::Wait).unwrap();
     assert!(matches!(handle.message(), Some(&ProtocolRequest::Send)));
-    assert_eq!(buffer.borrow().as_slice(), [b'a', b'a']);
+    assert_eq!(buffer.borrow().as_slice(), *b"aa");
 
     let handle = io.handle(handle, &ProtocolResponse::Done).unwrap();
     assert!(matches!(handle.message(), Some(&ProtocolRequest::Recv)));
@@ -294,16 +264,16 @@ fn simple_protocol_sync() {
     assert!(matches!(handle.message(), Some(&ProtocolRequest::Recv)));
 
     buffer.borrow_mut().clear();
-    buffer.borrow_mut().extend_from_slice(&[b'b', b'b']);
+    buffer.borrow_mut().extend_from_slice(b"bb");
     let handle = io.handle(handle, &ProtocolResponse::Done).unwrap();
     assert!(matches!(handle.message(), Some(&ProtocolRequest::Send)));
-    assert_eq!(buffer.borrow().as_slice(), [b'c', b'c']);
+    assert_eq!(buffer.borrow().as_slice(), *b"cc");
 
     let handle = io.handle(handle, &ProtocolResponse::Done).unwrap();
     assert!(matches!(handle.message(), Some(&ProtocolRequest::Recv)));
 
     buffer.borrow_mut().clear();
-    buffer.borrow_mut().extend_from_slice(&[b'd', b'd']);
+    buffer.borrow_mut().extend_from_slice(b"dd");
     assert!(io.handle(handle, &ProtocolResponse::Done).is_none());
 }
 

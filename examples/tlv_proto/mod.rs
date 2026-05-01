@@ -86,7 +86,7 @@ fn client_write<'a>(cache: &'a mut Cache, tag: u8, val: &[u8]) -> ClientRequest<
 pub async fn run_client<'a>(sans: Sans<ClientRequest<'a>, ClientResponse<'a>>) {
     let mut cache = Cache::new();
 
-    let mut sans_handle = sans.start(&ClientRequest::ReadPayload).await;
+    let mut sans_handle = sans.handle(&ClientRequest::ReadPayload).await;
     loop {
         let request = match sans_handle.message() {
             Some(ClientResponse::ReadPayload { payload }) => {
@@ -95,7 +95,7 @@ pub async fn run_client<'a>(sans: Sans<ClientRequest<'a>, ClientResponse<'a>>) {
             Some(ClientResponse::Write { tag, val }) => client_write(&mut cache, *tag, val),
             None => break,
         };
-        sans_handle = sans.handle(sans_handle, &request).await;
+        sans_handle = sans.handle(&request).await;
     }
 }
 
@@ -119,7 +119,7 @@ fn server_write<'a>(cache: &'a mut Cache, tag: u8, val: &[u8]) -> ServerRequest<
 pub async fn run_server<'a>(sans: Sans<ServerRequest<'a>, ServerResponse<'a>>) {
     let mut cache = Cache::new();
 
-    let mut sans_handle = sans.start(&ServerRequest::ReadPayload).await;
+    let mut sans_handle = sans.handle(&ServerRequest::ReadPayload).await;
     loop {
         let request = match sans_handle.message() {
             Some(ServerResponse::ReadPayload { payload }) => {
@@ -128,6 +128,6 @@ pub async fn run_server<'a>(sans: Sans<ServerRequest<'a>, ServerResponse<'a>>) {
             Some(ServerResponse::Write { tag, val }) => server_write(&mut cache, *tag, val),
             None => break,
         };
-        sans_handle = sans.handle(sans_handle, &request).await;
+        sans_handle = sans.handle(&request).await;
     }
 }

@@ -26,11 +26,11 @@
 //!
 //! async fn sans_task<'a>(sans: Sans<Request<'a>, Response<'a>>) {
 //!     let mut request_buf = [1u8; 10];
-//!     let handle = sans.start(&Request(&request_buf)).await;
+//!     let handle = sans.handle(&Request(&request_buf)).await;
 //!     assert_eq!(handle.message().unwrap().0, [2; 20]);
 //!
 //!     request_buf.fill(3);
-//!     let handle = sans.handle(handle, &Request(&request_buf)).await;
+//!     let handle = sans.handle(&Request(&request_buf)).await;
 //!     assert_eq!(handle.message().unwrap().0, [4; 20]);
 //! }
 //!
@@ -145,21 +145,9 @@ pub struct SansHandle<Response> {
 unsafe impl<Response> Send for SansHandle<Response> where for<'a> &'a Response: Send {}
 
 impl<Request: Unpin, Response: Unpin> Sans<Request, Response> {
-    /// Initial request from the Sans part.
-    pub fn start<'a>(&self, request: &'a Request) -> impl Future<Output = SansHandle<Response>> {
-        SansFuture {
-            request: Some(request),
-            _response: PhantomData,
-        }
-    }
-
     /// Next requests from the Sans part. It must receive SansHandle from the previous await call
     /// as the Response is not longer valid.
-    pub fn handle<'a>(
-        &self,
-        _response: SansHandle<Response>,
-        request: &'a Request,
-    ) -> impl Future<Output = SansHandle<Response>> {
+    pub fn handle(&self, request: &Request) -> impl Future<Output = SansHandle<Response>> {
         SansFuture {
             request: Some(request),
             _response: PhantomData,

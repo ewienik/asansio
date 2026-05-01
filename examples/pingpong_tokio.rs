@@ -69,8 +69,7 @@ struct Cache {
 
 impl Cache {
     fn new() -> Self {
-        let mut buf = Vec::new();
-        buf.reserve(1024);
+        let buf = Vec::with_capacity(1024);
         Self {
             buf,
             msg: String::new(),
@@ -102,7 +101,7 @@ async fn client_process_read_payload<'a>(
         })
     } else {
         cache.count_read += 1;
-        if cache.count_read % 3 == 0 {
+        if cache.count_read.is_multiple_of(3) {
             return Some(ClientResponse::Sleep {
                 duration: Duration::from_millis(200),
             });
