@@ -26,11 +26,11 @@
 //!
 //! async fn sans_task<'a>(sans: Sans<Request<'a>, Response<'a>>) {
 //!     let mut request_buf = [1u8; 10];
-//!     let handle = sans.handle(&Request(&request_buf)).await;
+//!     let handle = sans.handle(Request(&request_buf)).await;
 //!     assert_eq!(handle.message().unwrap().0, [2; 20]);
 //!
 //!     request_buf.fill(3);
-//!     let handle = sans.handle(&Request(&request_buf)).await;
+//!     let handle = sans.handle(Request(&request_buf)).await;
 //!     assert_eq!(handle.message().unwrap().0, [4; 20]);
 //! }
 //!
@@ -42,11 +42,11 @@
 //! assert_eq!(handle.message().unwrap().0, [1; 10]);
 //!
 //! let mut response_buf = [2; 20];
-//! let handle = io.handle(handle, &Response(&response_buf)).unwrap();
+//! let handle = io.handle(handle, Response(&response_buf)).unwrap();
 //! assert_eq!(handle.message().unwrap().0, [3; 10]);
 //!
 //! response_buf.fill(4);
-//! assert!(io.handle(handle, &Response(&response_buf)).is_none());
+//! assert!(io.handle(handle, Response(&response_buf)).is_none());
 //! ```
 //!
 //! This crate divides a problem into two parts. The first `Sans` takes care of the state machine
@@ -71,6 +71,7 @@
 #![no_std]
 
 use core::marker::PhantomData;
+use core::mem;
 use core::pin::Pin;
 use core::ptr;
 use core::task::Context;
@@ -82,29 +83,33 @@ use core::task::Waker;
 /// Store transmission message from(Tx) or to(Rx) Sans
 #[derive(Default)]
 enum Channel<Request, Response> {
-    Tx(*const Request),
-    Rx(*const Response),
+    Tx(Request),
+    Rx(Response),
     #[default]
     None,
 }
 
 impl<Request, Response> Channel<Request, Response> {
-    fn tx(request: &Request) -> Self {
-        Self::Tx(request as *const Request)
+    fn tx(request: Request) -> Self {
+        Self::Tx(request)
     }
 
-    fn rx(response: &Response) -> Self {
-        Self::Rx(response as *const Response)
+    fn rx(response: Response) -> Self {
+        Self::Rx(response)
+    }
+
+    fn take(&mut self) -> Self {
+        mem::take(self)
     }
 }
 
 /// The Future helper for handling data between Io and Sans
-struct SansFuture<'a, Request, Response> {
-    request: Option<&'a Request>,
+struct SansFuture<Request, Response> {
+    request: Option<Request>,
     _response: PhantomData<Response>,
 }
 
-impl<'a, Request: Unpin, Response: Unpin> Future for SansFuture<'a, Request, Response> {
+impl<Request: Unpin, Response: Unpin> Future for SansFuture<Request, Response> {
     type Output = SansHandle<Response>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -119,9 +124,9 @@ impl<'a, Request: Unpin, Response: Unpin> Future for SansFuture<'a, Request, Res
             *ch = Channel::tx(request);
             Poll::Pending
         } else {
-            match ch {
+            match ch.take() {
                 Channel::Rx(response) => Poll::Ready(SansHandle {
-                    response: *response,
+                    response: Some(response),
                 }),
                 Channel::Tx(_) => Poll::Pending,
                 Channel::None => unreachable!(),
@@ -138,16 +143,13 @@ pub struct Sans<Request, Response> {
 
 /// The holder of the Response from the Io to Sans
 pub struct SansHandle<Response> {
-    response: *const Response,
+    response: Option<Response>,
 }
-
-// It is safe as its lifetime is between two awaits in the Sans part
-unsafe impl<Response> Send for SansHandle<Response> where for<'a> &'a Response: Send {}
 
 impl<Request: Unpin, Response: Unpin> Sans<Request, Response> {
     /// Next requests from the Sans part. It must receive SansHandle from the previous await call
     /// as the Response is not longer valid.
-    pub fn handle(&self, request: &Request) -> impl Future<Output = SansHandle<Response>> {
+    pub fn handle(&self, request: Request) -> impl Future<Output = SansHandle<Response>> {
         SansFuture {
             request: Some(request),
             _response: PhantomData,
@@ -158,12 +160,7 @@ impl<Request: Unpin, Response: Unpin> Sans<Request, Response> {
 impl<Response> SansHandle<Response> {
     /// Retrieve a reference to the Response from the Io part.
     pub fn message(&self) -> Option<&Response> {
-        if self.response.is_null() {
-            return None;
-        }
-
-        // It is save as SansHandle is used only between two adjacent await points
-        Some(unsafe { &*self.response })
+        self.response.as_ref()
     }
 }
 
@@ -175,7 +172,7 @@ pub struct Io<Request, Response> {
 
 /// The holder of the Request from the Sans to Io
 pub struct IoHandle<'a, Request, Task> {
-    request: Option<&'a Request>,
+    request: Option<Request>,
     task: Pin<&'a mut Task>,
 }
 
@@ -191,7 +188,7 @@ impl<Request, Response> Io<Request, Response> {
             task,
         };
         handler.run_async(Channel::<Request, Response>::None);
-        handler.request.map(|_| handler)
+        handler.request.is_some().then_some(handler)
     }
 
     /// Next polling of the Future Task of the Sans part. It must receive IoHandle from the
@@ -200,13 +197,13 @@ impl<Request, Response> Io<Request, Response> {
     pub fn handle<'a, Task>(
         &self,
         mut handler: IoHandle<'a, Request, Task>,
-        response: &Response,
+        response: Response,
     ) -> Option<IoHandle<'a, Request, Task>>
     where
         Task: Future<Output = ()>,
     {
         handler.run_async(Channel::rx(response));
-        handler.request.map(move |_| handler)
+        handler.request.is_some().then_some(handler)
     }
 }
 
@@ -216,7 +213,7 @@ where
 {
     /// Retrieve a reference to the Request from the Sans part.
     pub fn message(&self) -> Option<&Request> {
-        self.request
+        self.request.as_ref()
     }
 
     fn run_async<Response>(&mut self, ch: Channel<Request, Response>) {
@@ -230,10 +227,7 @@ where
                 let Channel::Tx(request) = ch else {
                     unreachable!();
                 };
-
-                // It is safe as this will be the only one IoHandle and it will be consumed by the
-                // next handle call
-                Some(unsafe { &*request })
+                Some(request)
             }
         }
     }

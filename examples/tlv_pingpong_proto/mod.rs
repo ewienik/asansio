@@ -103,12 +103,12 @@ pub async fn run_client<'a>(sans: Sans<ClientRequest<'a>, ClientResponse<'a>>) {
         return;
     };
 
-    let mut sans_handle = sans.handle(&ClientRequest::ReadPayload).await;
+    let mut sans_handle = sans.handle(ClientRequest::ReadPayload).await;
     let mut client = client_response(sans_handle.message());
     loop {
         client = match client {
             Some(Client::Tlv(response)) => {
-                tlv_io_handle = tlv_io.handle(tlv_io_handle.take().unwrap(), &response);
+                tlv_io_handle = tlv_io.handle(tlv_io_handle.take().unwrap(), response);
                 if tlv_io_handle.is_none() {
                     return;
                 };
@@ -116,7 +116,7 @@ pub async fn run_client<'a>(sans: Sans<ClientRequest<'a>, ClientResponse<'a>>) {
             }
 
             Some(Client::Pp(response)) => {
-                pp_io_handle = pp_io.handle(pp_io_handle.take().unwrap(), &response);
+                pp_io_handle = pp_io.handle(pp_io_handle.take().unwrap(), response);
                 if pp_io_handle.is_none() {
                     return;
                 };
@@ -124,7 +124,7 @@ pub async fn run_client<'a>(sans: Sans<ClientRequest<'a>, ClientResponse<'a>>) {
             }
 
             Some(Client::Request(request)) => {
-                sans_handle = sans.handle(&request).await;
+                sans_handle = sans.handle(request).await;
                 client_response(sans_handle.message())
             }
 
@@ -190,12 +190,12 @@ pub async fn run_server<'a>(sans: Sans<ServerRequest<'a>, ServerResponse<'a>>) {
         return;
     };
 
-    let mut sans_handle = sans.handle(&ServerRequest::ReadPayload).await;
+    let mut sans_handle = sans.handle(ServerRequest::ReadPayload).await;
     let mut server = server_response(sans_handle.message());
     loop {
         server = match server {
             Some(Server::Tlv(response)) => {
-                tlv_io_handle = tlv_io.handle(tlv_io_handle.take().unwrap(), &response);
+                tlv_io_handle = tlv_io.handle(tlv_io_handle.take().unwrap(), response);
                 if tlv_io_handle.is_none() {
                     return;
                 };
@@ -203,7 +203,7 @@ pub async fn run_server<'a>(sans: Sans<ServerRequest<'a>, ServerResponse<'a>>) {
             }
 
             Some(Server::Pp(response)) => {
-                pp_io_handle = pp_io.handle(pp_io_handle.take().unwrap(), &response);
+                pp_io_handle = pp_io.handle(pp_io_handle.take().unwrap(), response);
                 if pp_io_handle.is_none() {
                     return;
                 };
@@ -211,7 +211,7 @@ pub async fn run_server<'a>(sans: Sans<ServerRequest<'a>, ServerResponse<'a>>) {
             }
 
             Some(Server::Request(request)) => {
-                sans_handle = sans.handle(&request).await;
+                sans_handle = sans.handle(request).await;
                 server_response(sans_handle.message())
             }
 

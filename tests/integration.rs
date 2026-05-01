@@ -23,14 +23,14 @@ fn single_call() {
     let (sans, io) = asansio::new::<Request, Response>();
 
     let task = pin!(async {
-        let handle = sans.handle(&Request).await;
+        let handle = sans.handle(Request).await;
         assert!(matches!(handle.message(), Some(&Response)));
     });
 
     let handle = io.start(task).unwrap();
     assert!(matches!(handle.message(), Some(&Request)));
 
-    assert!(io.handle(handle, &Response).is_none());
+    assert!(io.handle(handle, Response).is_none());
 }
 
 #[test]
@@ -41,24 +41,24 @@ fn send_owned_payload() {
     let (sans, io) = asansio::new::<Request, Response>();
 
     let task = pin!(async {
-        let handle = sans.handle(&Request([1; 10])).await;
-        assert!(matches!(handle.message(), Some(&Response(_))));
+        let handle = sans.handle(Request([1; 10])).await;
+        assert!(matches!(handle.message(), Some(Response(_))));
         assert_eq!(handle.message().unwrap().0, [2; 20]);
 
-        let handle = sans.handle(&Request([3; 10])).await;
-        assert!(matches!(handle.message(), Some(&Response(_))));
+        let handle = sans.handle(Request([3; 10])).await;
+        assert!(matches!(handle.message(), Some(Response(_))));
         assert_eq!(handle.message().unwrap().0, [4; 20]);
     });
 
     let handle = io.start(task).unwrap();
-    assert!(matches!(handle.message(), Some(&Request(_))));
+    assert!(matches!(handle.message(), Some(Request(_))));
     assert_eq!(handle.message().unwrap().0, [1; 10]);
 
-    let handle = io.handle(handle, &Response([2; 20])).unwrap();
-    assert!(matches!(handle.message(), Some(&Request(_))));
+    let handle = io.handle(handle, Response([2; 20])).unwrap();
+    assert!(matches!(handle.message(), Some(Request(_))));
     assert_eq!(handle.message().unwrap().0, [3; 10]);
 
-    assert!(io.handle(handle, &Response([4; 20])).is_none());
+    assert!(io.handle(handle, Response([4; 20])).is_none());
 }
 
 #[test]
@@ -72,12 +72,12 @@ fn send_borrowed_payload() {
         let mut request_buf = vec![0u8; 10];
 
         request_buf.fill(1);
-        let handle = sans.handle(&Request(&request_buf)).await;
+        let handle = sans.handle(Request(&request_buf)).await;
         assert!(matches!(handle.message(), Some(&Response(_))));
         assert_eq!(handle.message().unwrap().0, [2; 20]);
 
         request_buf.fill(3);
-        let handle = sans.handle(&Request(&request_buf)).await;
+        let handle = sans.handle(Request(&request_buf)).await;
         assert!(matches!(handle.message(), Some(&Response(_))));
         assert_eq!(handle.message().unwrap().0, [4; 20]);
 
@@ -85,7 +85,7 @@ fn send_borrowed_payload() {
         let mut request_buf = vec![0u8; 10];
 
         request_buf.fill(5);
-        let handle = sans.handle(&Request(&request_buf)).await;
+        let handle = sans.handle(Request(&request_buf)).await;
         assert!(matches!(handle.message(), Some(&Response(_))));
         assert_eq!(handle.message().unwrap().0, [6; 20]);
     });
@@ -97,12 +97,12 @@ fn send_borrowed_payload() {
     let mut response_buf = vec![0; 20];
 
     response_buf.fill(2);
-    let handle = io.handle(handle, &Response(&response_buf)).unwrap();
+    let handle = io.handle(handle, Response(&response_buf)).unwrap();
     assert!(matches!(handle.message(), Some(&Request(_))));
     assert_eq!(handle.message().unwrap().0, [3; 10]);
 
     response_buf.fill(4);
-    let handle = io.handle(handle, &Response(&response_buf)).unwrap();
+    let handle = io.handle(handle, Response(&response_buf)).unwrap();
     assert!(matches!(handle.message(), Some(&Request(_))));
     assert_eq!(handle.message().unwrap().0, [5; 10]);
 
@@ -110,7 +110,7 @@ fn send_borrowed_payload() {
     let mut response_buf = vec![0; 20];
 
     response_buf.fill(6);
-    assert!(io.handle(handle, &Response(&response_buf)).is_none());
+    assert!(io.handle(handle, Response(&response_buf)).is_none());
 }
 
 trait Protocol {
@@ -144,7 +144,7 @@ impl ProtocolSync {
 impl Protocol for ProtocolSync {
     async fn alloc(&mut self, size: usize) -> Box<[u8]> {
         loop {
-            let handle = self.sans.handle(&ProtocolRequest::Alloc).await;
+            let handle = self.sans.handle(ProtocolRequest::Alloc).await;
             if matches!(handle.message(), Some(ProtocolResponse::Done)) {
                 break;
             }
@@ -159,7 +159,7 @@ impl Protocol for ProtocolSync {
             buffer.extend_from_slice(buf);
         }
         loop {
-            let handle = self.sans.handle(&ProtocolRequest::Send).await;
+            let handle = self.sans.handle(ProtocolRequest::Send).await;
             if matches!(handle.message(), Some(ProtocolResponse::Done)) {
                 break;
             }
@@ -170,7 +170,7 @@ impl Protocol for ProtocolSync {
     async fn recv(&mut self, buf: &mut [u8]) -> usize {
         self.buffer.borrow_mut().clear();
         loop {
-            let handle = self.sans.handle(&ProtocolRequest::Recv).await;
+            let handle = self.sans.handle(ProtocolRequest::Recv).await;
             if matches!(handle.message(), Some(ProtocolResponse::Done)) {
                 break;
             }
@@ -244,37 +244,37 @@ fn simple_protocol_sync() {
     let task = pin!(run(proto));
 
     let handle = io.start(task).unwrap();
-    assert!(matches!(handle.message(), Some(&ProtocolRequest::Alloc)));
+    assert!(matches!(handle.message(), Some(ProtocolRequest::Alloc)));
 
-    let handle = io.handle(handle, &ProtocolResponse::Wait).unwrap();
-    assert!(matches!(handle.message(), Some(&ProtocolRequest::Alloc)));
+    let handle = io.handle(handle, ProtocolResponse::Wait).unwrap();
+    assert!(matches!(handle.message(), Some(ProtocolRequest::Alloc)));
 
-    let handle = io.handle(handle, &ProtocolResponse::Done).unwrap();
-    assert!(matches!(handle.message(), Some(&ProtocolRequest::Send)));
+    let handle = io.handle(handle, ProtocolResponse::Done).unwrap();
+    assert!(matches!(handle.message(), Some(ProtocolRequest::Send)));
     assert_eq!(buffer.borrow().as_slice(), *b"aa");
 
-    let handle = io.handle(handle, &ProtocolResponse::Wait).unwrap();
-    assert!(matches!(handle.message(), Some(&ProtocolRequest::Send)));
+    let handle = io.handle(handle, ProtocolResponse::Wait).unwrap();
+    assert!(matches!(handle.message(), Some(ProtocolRequest::Send)));
     assert_eq!(buffer.borrow().as_slice(), *b"aa");
 
-    let handle = io.handle(handle, &ProtocolResponse::Done).unwrap();
-    assert!(matches!(handle.message(), Some(&ProtocolRequest::Recv)));
+    let handle = io.handle(handle, ProtocolResponse::Done).unwrap();
+    assert!(matches!(handle.message(), Some(ProtocolRequest::Recv)));
 
-    let handle = io.handle(handle, &ProtocolResponse::Wait).unwrap();
-    assert!(matches!(handle.message(), Some(&ProtocolRequest::Recv)));
+    let handle = io.handle(handle, ProtocolResponse::Wait).unwrap();
+    assert!(matches!(handle.message(), Some(ProtocolRequest::Recv)));
 
     buffer.borrow_mut().clear();
     buffer.borrow_mut().extend_from_slice(b"bb");
-    let handle = io.handle(handle, &ProtocolResponse::Done).unwrap();
-    assert!(matches!(handle.message(), Some(&ProtocolRequest::Send)));
+    let handle = io.handle(handle, ProtocolResponse::Done).unwrap();
+    assert!(matches!(handle.message(), Some(ProtocolRequest::Send)));
     assert_eq!(buffer.borrow().as_slice(), *b"cc");
 
-    let handle = io.handle(handle, &ProtocolResponse::Done).unwrap();
-    assert!(matches!(handle.message(), Some(&ProtocolRequest::Recv)));
+    let handle = io.handle(handle, ProtocolResponse::Done).unwrap();
+    assert!(matches!(handle.message(), Some(ProtocolRequest::Recv)));
 
     buffer.borrow_mut().clear();
     buffer.borrow_mut().extend_from_slice(b"dd");
-    assert!(io.handle(handle, &ProtocolResponse::Done).is_none());
+    assert!(io.handle(handle, ProtocolResponse::Done).is_none());
 }
 
 #[tokio::test]

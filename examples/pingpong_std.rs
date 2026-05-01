@@ -120,6 +120,6 @@ fn client_process(mut tcp: TcpStream) {
         let Some(response) = response else {
             break;
         };
-        handle = io.handle(handle.take().unwrap(), &response);
+        handle = io.handle(handle.take().unwrap(), response);
     }
 }
