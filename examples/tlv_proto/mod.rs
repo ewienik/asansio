@@ -1,133 +1,166 @@
-use asansio::Sans;
-use std::collections::VecDeque;
-
-pub enum ClientRequest<'a> {
-    ReadPayload,
-    WritePayload { payload: &'a [u8] },
-    Read { tag: u8, val: &'a [u8] },
+#[derive(Debug)]
+pub struct Message {
+    pub tag: u8,
+    pub buf: Box<[u8]>,
 }
 
-pub enum ClientResponse<'a> {
-    ReadPayload { payload: &'a [u8] },
-    Write { tag: u8, val: &'a [u8] },
+impl Message {
+    pub fn new(tag: u8, buf: Box<[u8]>) -> Option<Self> {
+        (buf.len() <= u8::MAX as usize).then_some(Self { tag, buf })
+    }
 }
 
-pub enum ServerRequest<'a> {
-    ReadPayload,
-    WritePayload { payload: &'a [u8] },
-    Read { tag: u8, val: &'a [u8] },
+#[derive(Debug)]
+pub enum Recv {
+    Downstream(usize),
+    Upstream(Message),
 }
 
-pub enum ServerResponse<'a> {
-    ReadPayload { payload: &'a [u8] },
-    Write { tag: u8, val: &'a [u8] },
+pub trait Iface {
+    type Error;
+
+    async fn allocate(&mut self, size: usize) -> Result<Box<[u8]>, Self::Error>;
+    async fn recv(&mut self, downstream_buf: &mut [u8]) -> Result<Recv, Self::Error>;
+    async fn send_downstream(&mut self, buf: &[u8]) -> Result<usize, Self::Error>;
+    async fn send_upstream(&mut self, message: Message) -> Result<(), Self::Error>;
 }
 
 struct Cache {
-    write: Vec<u8>,
-    read: VecDeque<u8>,
-    read_consumed: usize,
+    recv: Box<[u8]>,
+    recv_len: usize,
+    send: Box<[u8]>,
+    send_len: usize,
+    send_consumed: usize,
 }
 
 impl Cache {
-    fn new() -> Self {
-        Self {
-            write: Vec::new(),
-            read: VecDeque::new(),
-            read_consumed: 0,
+    const HEADER_SIZE: usize = 2;
+    const MAX_PACKET_SIZE: usize = u8::MAX as usize + Self::HEADER_SIZE;
+
+    async fn new(callbacks: &mut impl Iface) -> Result<Self, Error> {
+        let recv = callbacks
+            .allocate(Self::MAX_PACKET_SIZE)
+            .await
+            .map_err(|_| Error::Allocate)?;
+        let send = callbacks
+            .allocate(Self::MAX_PACKET_SIZE)
+            .await
+            .map_err(|_| Error::Allocate)?;
+        Ok(Self {
+            recv,
+            recv_len: 0,
+            send,
+            send_len: 0,
+            send_consumed: 0,
+        })
+    }
+
+    fn recv_downstream_buffer(&mut self) -> &mut [u8] {
+        if self.recv_len < Self::HEADER_SIZE {
+            &mut self.recv[self.recv_len..Self::HEADER_SIZE]
+        } else {
+            let len = self.recv[1] as usize + Self::HEADER_SIZE;
+            &mut self.recv[self.recv_len..len]
         }
     }
 
-    fn read_packet(&mut self, payload: &[u8]) -> Option<&[u8]> {
-        self.read.drain(..self.read_consumed);
-        self.read_consumed = 0;
-
-        payload.iter().for_each(|byte| self.read.push_back(*byte));
-
-        if self.read.len() < 2 {
-            return None;
+    fn recv_downstream_consumed(&mut self, len: usize) -> Result<(), Error> {
+        if self.recv.len() < self.recv_len + len {
+            return Err(Error::RecvDownstreamConsumed);
         }
-
-        let len = self.read[1] as usize;
-        if self.read.len() < len + 2 {
-            return None;
-        }
-
-        self.read_consumed = len + 2;
-        Some(&self.read.make_contiguous()[..self.read_consumed])
+        self.recv_len += len;
+        Ok(())
     }
 
-    fn write_packet(&mut self, tag: u8, val: &[u8]) -> &[u8] {
-        self.write.clear();
-        self.write.push(tag);
-        self.write.push(val.len() as u8);
-        self.write.extend_from_slice(val);
-        &self.write[0..val.len() + 2]
+    fn send_downstream_buffer(&self) -> Option<&[u8]> {
+        (self.send_len > self.send_consumed)
+            .then_some(&self.send[self.send_consumed..self.send_len])
+    }
+
+    fn send_downstream_consumed(&mut self, len: usize) -> Result<(), Error> {
+        if self.send_len < self.send_consumed + len {
+            return Err(Error::SendDownstreamConsumed);
+        }
+        self.send_consumed += len;
+        if self.send_consumed == self.send_len {
+            self.send_len = 0;
+            self.send_consumed = 0;
+        }
+        Ok(())
+    }
+
+    fn recv_upstream(&mut self, message: Message) -> Result<(), Error> {
+        if self.send_len > 0 {
+            return Err(Error::Internal);
+        }
+        self.send_len = message.buf.len() + Self::HEADER_SIZE;
+        self.send[0] = message.tag;
+        self.send[1] = message.buf.len() as u8;
+        self.send[2..self.send_len].copy_from_slice(&message.buf);
+        Ok(())
+    }
+
+    async fn send_upstream(
+        &mut self,
+        callbacks: &mut impl Iface,
+    ) -> Result<Option<Message>, Error> {
+        if self.recv_len < Self::HEADER_SIZE {
+            return Ok(None);
+        }
+        let len = self.recv[1] as usize + Self::HEADER_SIZE;
+        if self.recv_len < len {
+            return Ok(None);
+        }
+        let mut buf = callbacks
+            .allocate(len - Self::HEADER_SIZE)
+            .await
+            .map_err(|_| Error::Allocate)?;
+        buf.copy_from_slice(&self.recv[Self::HEADER_SIZE..len]);
+        self.recv_len = 0;
+        Ok(Some(Message {
+            tag: self.recv[0],
+            buf,
+        }))
     }
 }
 
-fn client_read_payload<'a>(cache: &'a mut Cache, payload: &[u8]) -> ClientRequest<'a> {
-    if let Some(buf) = cache.read_packet(payload) {
-        ClientRequest::Read {
-            tag: buf[0],
-            val: &buf[2..],
-        }
-    } else {
-        ClientRequest::ReadPayload
-    }
+#[derive(Clone, Debug)]
+pub enum Error {
+    Allocate,
+    Recv,
+    RecvDownstreamConsumed,
+    SendDownstreamConsumed,
+    SendUpstream,
+    SendDownstream,
+    Internal,
 }
 
-fn client_write<'a>(cache: &'a mut Cache, tag: u8, val: &[u8]) -> ClientRequest<'a> {
-    ClientRequest::WritePayload {
-        payload: cache.write_packet(tag, val),
-    }
-}
+pub async fn run(mut callbacks: impl Iface) -> Result<(), Error> {
+    let mut cache = Cache::new(&mut callbacks).await?;
 
-pub async fn run_client<'a>(sans: Sans<ClientRequest<'a>, ClientResponse<'a>>) {
-    let mut cache = Cache::new();
-
-    let mut sans_handle = sans.handle(ClientRequest::ReadPayload).await;
     loop {
-        let request = match sans_handle.message() {
-            Some(ClientResponse::ReadPayload { payload }) => {
-                client_read_payload(&mut cache, payload)
-            }
-            Some(ClientResponse::Write { tag, val }) => client_write(&mut cache, *tag, val),
-            None => break,
-        };
-        sans_handle = sans.handle(request).await;
-    }
-}
-
-fn server_read_payload<'a>(cache: &'a mut Cache, payload: &[u8]) -> ServerRequest<'a> {
-    if let Some(buf) = cache.read_packet(payload) {
-        ServerRequest::Read {
-            tag: buf[0],
-            val: &buf[2..],
+        let recv = callbacks
+            .recv(cache.recv_downstream_buffer())
+            .await
+            .map_err(|_| Error::Recv)?;
+        match recv {
+            Recv::Downstream(len) => cache.recv_downstream_consumed(len)?,
+            Recv::Upstream(message) => cache.recv_upstream(message)?,
         }
-    } else {
-        ServerRequest::ReadPayload
-    }
-}
 
-fn server_write<'a>(cache: &'a mut Cache, tag: u8, val: &[u8]) -> ServerRequest<'a> {
-    ServerRequest::WritePayload {
-        payload: cache.write_packet(tag, val),
-    }
-}
+        if let Some(message) = cache.send_upstream(&mut callbacks).await? {
+            callbacks
+                .send_upstream(message)
+                .await
+                .map_err(|_| Error::SendUpstream)?;
+        }
 
-pub async fn run_server<'a>(sans: Sans<ServerRequest<'a>, ServerResponse<'a>>) {
-    let mut cache = Cache::new();
-
-    let mut sans_handle = sans.handle(ServerRequest::ReadPayload).await;
-    loop {
-        let request = match sans_handle.message() {
-            Some(ServerResponse::ReadPayload { payload }) => {
-                server_read_payload(&mut cache, payload)
-            }
-            Some(ServerResponse::Write { tag, val }) => server_write(&mut cache, *tag, val),
-            None => break,
-        };
-        sans_handle = sans.handle(request).await;
+        while let Some(buf) = cache.send_downstream_buffer() {
+            let len = callbacks
+                .send_downstream(buf)
+                .await
+                .map_err(|_| Error::SendDownstream)?;
+            cache.send_downstream_consumed(len)?;
+        }
     }
 }

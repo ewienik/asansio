@@ -1,108 +1,97 @@
-use asansio::Sans;
 use std::time::Duration;
 
-pub enum ClientRequest<'a> {
-    Ready,
-    WriteMessage { payload: &'a [u8] },
-    WriteSleep { payload: &'a [u8] },
-    Message { msg: &'a str },
+#[derive(Debug)]
+pub enum Message {
+    Message(String),
+    Sleep(Duration),
 }
 
-pub enum ClientResponse<'a> {
-    ReadMessage { payload: &'a [u8] },
-    Message { msg: &'a str },
-    Sleep { duration: Duration },
-}
-
-pub enum ServerRequest<'a> {
-    Read,
-    WriteMessage { payload: &'a [u8] },
-    Sleep { duration: Duration },
-}
-
-pub enum ServerResponse<'a> {
-    ReadMessage { payload: &'a [u8] },
-    ReadSleep { payload: &'a [u8] },
-}
-
-struct Cache {
-    read: Vec<u8>,
-}
-
-impl Cache {
-    fn new() -> Self {
-        Self { read: Vec::new() }
+impl Message {
+    pub fn new_message(msg: impl Into<String> + AsRef<str>) -> Option<Self> {
+        (msg.as_ref().len() <= u8::MAX as usize).then_some(Self::Message(msg.into()))
     }
 }
 
-fn client_read_message<'a>(payload: &'a [u8]) -> ClientRequest<'a> {
-    ClientRequest::Message {
-        msg: str::from_utf8(payload).unwrap_or("(wrong utf-8 encoding)"),
-    }
+#[derive(Debug)]
+pub enum Payload {
+    Message(Box<[u8]>),
+    Sleep(Box<[u8]>),
 }
 
-fn client_message<'a>(msg: &'a str) -> ClientRequest<'a> {
-    ClientRequest::WriteMessage {
-        payload: msg.as_bytes(),
-    }
-}
+impl TryFrom<Payload> for Message {
+    type Error = Error;
 
-fn client_sleep<'a>(cache: &'a mut Cache, duration: Duration) -> ClientRequest<'a> {
-    cache.read.clear();
-    cache
-        .read
-        .push(duration.as_millis().clamp(0, u8::MAX as u128) as u8);
-    ClientRequest::WriteSleep {
-        payload: cache.read.as_slice(),
-    }
-}
-
-pub async fn run_client<'a>(sans: Sans<ClientRequest<'a>, ClientResponse<'a>>) {
-    let mut cache = Cache::new();
-
-    let mut sans_handle = sans.handle(ClientRequest::Ready).await;
-    loop {
-        let request = match sans_handle.message() {
-            Some(ClientResponse::ReadMessage { payload }) => client_read_message(payload),
-            Some(ClientResponse::Message { msg }) => client_message(msg),
-            Some(ClientResponse::Sleep { duration }) => client_sleep(&mut cache, *duration),
-            None => break,
-        };
-        sans_handle = sans.handle(request).await;
-    }
-}
-
-fn server_read_message<'a>(cache: &'a mut Cache, payload: &[u8]) -> ServerRequest<'a> {
-    cache.read.clear();
-    cache.read.extend_from_slice(b"Received: ");
-    cache.read.extend_from_slice(payload);
-    ServerRequest::WriteMessage {
-        payload: cache.read.as_slice(),
-    }
-}
-
-fn server_read_sleep<'a>(payload: &[u8]) -> ServerRequest<'a> {
-    if payload.len() == 1 {
-        let duration = Duration::from_millis(payload[0] as u64);
-
-        ServerRequest::Sleep { duration }
-    } else {
-        ServerRequest::Read
-    }
-}
-
-pub async fn run_server<'a>(sans: Sans<ServerRequest<'a>, ServerResponse<'a>>) {
-    let mut cache = Cache::new();
-
-    let mut sans_handle = sans.handle(ServerRequest::Read).await;
-    loop {
-        let request = match sans_handle.message() {
-            Some(ServerResponse::ReadMessage { payload }) => {
-                server_read_message(&mut cache, payload)
+    fn try_from(payload: Payload) -> Result<Self, Self::Error> {
+        Ok(match payload {
+            Payload::Message(buf) => {
+                Message::Message(String::from_utf8(buf.into()).map_err(|_| Error::PayloadFormat)?)
             }
-            Some(ServerResponse::ReadSleep { payload }) => server_read_sleep(payload),
-            None => break,
-        };
-        sans_handle = sans.handle(request).await;
+            Payload::Sleep(buf) => Message::Sleep(Duration::from_millis(
+                buf.first().copied().ok_or(Error::PayloadFormat)? as u64,
+            )),
+        })
+    }
+}
+
+#[derive(Debug)]
+pub enum Recv {
+    Downstream(Payload),
+    Upstream(Message),
+}
+
+pub trait Iface {
+    type Error;
+
+    async fn allocate(&mut self, size: usize) -> Result<Box<[u8]>, Self::Error>;
+    async fn recv(&mut self) -> Result<Recv, Self::Error>;
+    async fn send_downstream(&mut self, payload: Payload) -> Result<(), Self::Error>;
+    async fn send_upstream(&mut self, message: Message) -> Result<(), Self::Error>;
+}
+
+#[derive(Clone, Debug)]
+pub enum Error {
+    Allocate,
+    Recv,
+    PayloadFormat,
+    SendUpstream,
+    SendDownstream,
+}
+
+async fn to_payload(callbacks: &mut impl Iface, message: Message) -> Result<Payload, Error> {
+    Ok(match message {
+        Message::Message(message) => {
+            let bytes = message.as_bytes();
+            let mut buf = callbacks
+                .allocate(bytes.len())
+                .await
+                .map_err(|_| Error::Allocate)?;
+            buf.copy_from_slice(bytes);
+            Payload::Message(buf)
+        }
+        Message::Sleep(duration) => {
+            let mut buf = callbacks.allocate(1).await.map_err(|_| Error::Allocate)?;
+            buf[0] = duration.as_millis().clamp(0, u8::MAX as u128) as u8;
+            Payload::Sleep(buf)
+        }
+    })
+}
+
+pub async fn run(mut callbacks: impl Iface) -> Result<(), Error> {
+    loop {
+        let recv = callbacks.recv().await.map_err(|_| Error::Recv)?;
+
+        match recv {
+            Recv::Downstream(payload) => callbacks
+                .send_upstream(payload.try_into()?)
+                .await
+                .map_err(|_| Error::SendUpstream)?,
+            Recv::Upstream(message) => {
+                let payload = to_payload(&mut callbacks, message).await?;
+                callbacks
+                    .send_downstream(payload)
+                    .await
+                    .map_err(|_| Error::SendDownstream)?
+            }
+        }
     }
 }
