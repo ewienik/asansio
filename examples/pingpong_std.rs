@@ -179,9 +179,11 @@ struct Client {
 
     tlv_io: Io<TlvRequest, TlvResponse>,
     tlv_handle: Option<IoHandle<TlvRequest, TlvResponse, Box<dyn Future<Output = ()>>>>,
+    tlv_request: TlvRequest,
 
     pp_io: Io<PpRequest, PpResponse>,
     pp_handle: Option<IoHandle<PpRequest, PpResponse, Box<dyn Future<Output = ()>>>>,
+    pp_request: PpRequest,
 }
 
 impl Client {
@@ -223,16 +225,20 @@ impl Client {
             }
         }) as Pin<Box<dyn Future<Output = ()>>>;
 
-        let tlv_handle = Some(tlv_io.start(tlv_proto)?);
-        let pp_handle = Some(pp_io.start(pp_proto)?);
+        let (tlv_handle, tlv_request) = tlv_io.start(tlv_proto)?;
+        let tlv_handle = Some(tlv_handle);
+        let (pp_handle, pp_request) = pp_io.start(pp_proto)?;
+        let pp_handle = Some(pp_handle);
 
         Some(Self {
             tx: main_to_pp,
             rx: pp_to_main,
             tlv_io,
             tlv_handle,
+            tlv_request,
             pp_io,
             pp_handle,
+            pp_request,
         })
     }
 
@@ -251,32 +257,30 @@ impl Client {
     }
 
     fn process_send(&mut self) -> Option<()> {
-        while self.tx.borrow().is_some()
-            || !matches!(self.tlv_handle.as_ref()?.message(), Some(&TlvRequest::Recv))
-        {
-            self.tlv_handle = Some(
-                self.tlv_io
-                    .handle(self.tlv_handle.take()?, TlvResponse::Done)?,
-            );
-            self.pp_handle = Some(
-                self.pp_io
-                    .handle(self.pp_handle.take()?, PpResponse::Done)?,
-            );
+        while self.tx.borrow().is_some() || !matches!(self.tlv_request, TlvRequest::Recv) {
+            self.process()?;
         }
         Some(())
     }
 
     fn process_recv(&mut self) -> Option<()> {
         while self.rx.borrow().is_none() {
-            self.tlv_handle = Some(
-                self.tlv_io
-                    .handle(self.tlv_handle.take()?, TlvResponse::Done)?,
-            );
-            self.pp_handle = Some(
-                self.pp_io
-                    .handle(self.pp_handle.take()?, PpResponse::Done)?,
-            );
+            self.process()?;
         }
+        Some(())
+    }
+
+    fn process(&mut self) -> Option<()> {
+        let (tlv_handle, tlv_request) = self
+            .tlv_io
+            .handle(self.tlv_handle.take()?, TlvResponse::Done)?;
+        self.tlv_handle = Some(tlv_handle);
+        self.tlv_request = tlv_request;
+        let (pp_handle, pp_request) = self
+            .pp_io
+            .handle(self.pp_handle.take()?, PpResponse::Done)?;
+        self.pp_handle = Some(pp_handle);
+        self.pp_request = pp_request;
         Some(())
     }
 }

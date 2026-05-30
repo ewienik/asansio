@@ -27,8 +27,8 @@ fn single_call() {
         assert!(matches!(handle.message(), Some(&Response)));
     });
 
-    let handle = io.start(task).unwrap();
-    assert!(matches!(handle.message(), Some(&Request)));
+    let (handle, request) = io.start(task).unwrap();
+    assert!(matches!(request, Request));
 
     assert!(io.handle(handle, Response).is_none());
 }
@@ -45,8 +45,8 @@ fn pin_box_single_call() {
         assert!(matches!(handle.message(), Some(&Response)));
     });
 
-    let handle = io.start(task).unwrap();
-    assert!(matches!(handle.message(), Some(&Request)));
+    let (handle, request) = io.start(task).unwrap();
+    assert!(matches!(request, Request));
 
     assert!(io.handle(handle, Response).is_none());
 }
@@ -68,13 +68,13 @@ fn send_owned_payload() {
         assert_eq!(handle.message().unwrap().0, [4; 20]);
     });
 
-    let handle = io.start(task).unwrap();
-    assert!(matches!(handle.message(), Some(Request(_))));
-    assert_eq!(handle.message().unwrap().0, [1; 10]);
+    let (handle, request) = io.start(task).unwrap();
+    assert!(matches!(request, Request(_)));
+    assert_eq!(request.0, [1; 10]);
 
-    let handle = io.handle(handle, Response([2; 20])).unwrap();
-    assert!(matches!(handle.message(), Some(Request(_))));
-    assert_eq!(handle.message().unwrap().0, [3; 10]);
+    let (handle, request) = io.handle(handle, Response([2; 20])).unwrap();
+    assert!(matches!(request, Request(_)));
+    assert_eq!(request.0, [3; 10]);
 
     assert!(io.handle(handle, Response([4; 20])).is_none());
 }
@@ -209,34 +209,34 @@ fn simple_protocol_sync() {
 
     let task = pin!(run(proto));
 
-    let handle = io.start(task).unwrap();
-    assert!(matches!(handle.message(), Some(ProtocolRequest::Alloc)));
+    let (handle, request) = io.start(task).unwrap();
+    assert!(matches!(request, ProtocolRequest::Alloc));
 
-    let handle = io.handle(handle, ProtocolResponse::Wait).unwrap();
-    assert!(matches!(handle.message(), Some(ProtocolRequest::Alloc)));
+    let (handle, request) = io.handle(handle, ProtocolResponse::Wait).unwrap();
+    assert!(matches!(request, ProtocolRequest::Alloc));
 
-    let handle = io.handle(handle, ProtocolResponse::Done).unwrap();
-    assert!(matches!(handle.message(), Some(ProtocolRequest::Send)));
+    let (handle, request) = io.handle(handle, ProtocolResponse::Done).unwrap();
+    assert!(matches!(request, ProtocolRequest::Send));
     assert_eq!(buffer.borrow().as_slice(), *b"aa");
 
-    let handle = io.handle(handle, ProtocolResponse::Wait).unwrap();
-    assert!(matches!(handle.message(), Some(ProtocolRequest::Send)));
+    let (handle, request) = io.handle(handle, ProtocolResponse::Wait).unwrap();
+    assert!(matches!(request, ProtocolRequest::Send));
     assert_eq!(buffer.borrow().as_slice(), *b"aa");
 
-    let handle = io.handle(handle, ProtocolResponse::Done).unwrap();
-    assert!(matches!(handle.message(), Some(ProtocolRequest::Recv)));
+    let (handle, request) = io.handle(handle, ProtocolResponse::Done).unwrap();
+    assert!(matches!(request, ProtocolRequest::Recv));
 
-    let handle = io.handle(handle, ProtocolResponse::Wait).unwrap();
-    assert!(matches!(handle.message(), Some(ProtocolRequest::Recv)));
+    let (handle, request) = io.handle(handle, ProtocolResponse::Wait).unwrap();
+    assert!(matches!(request, ProtocolRequest::Recv));
 
     buffer.borrow_mut().clear();
     buffer.borrow_mut().extend_from_slice(b"bb");
-    let handle = io.handle(handle, ProtocolResponse::Done).unwrap();
-    assert!(matches!(handle.message(), Some(ProtocolRequest::Send)));
+    let (handle, request) = io.handle(handle, ProtocolResponse::Done).unwrap();
+    assert!(matches!(request, ProtocolRequest::Send));
     assert_eq!(buffer.borrow().as_slice(), *b"cc");
 
-    let handle = io.handle(handle, ProtocolResponse::Done).unwrap();
-    assert!(matches!(handle.message(), Some(ProtocolRequest::Recv)));
+    let (handle, request) = io.handle(handle, ProtocolResponse::Done).unwrap();
+    assert!(matches!(request, ProtocolRequest::Recv));
 
     buffer.borrow_mut().clear();
     buffer.borrow_mut().extend_from_slice(b"dd");

@@ -38,12 +38,12 @@
 //!
 //! let task = pin!(sans_task(sans));
 //!
-//! let handle = io.start(task).unwrap();
-//! assert_eq!(handle.message().unwrap().0, [1; 10]);
+//! let (handle, request) = io.start(task).unwrap();
+//! assert_eq!(request.0, [1; 10]);
 //!
 //! let mut response_buf = [2; 20];
-//! let handle = io.handle(handle, Response(response_buf)).unwrap();
-//! assert_eq!(handle.message().unwrap().0, [3; 10]);
+//! let (handle, request) = io.handle(handle, Response(response_buf)).unwrap();
+//! assert_eq!(request.0, [3; 10]);
 //!
 //! response_buf.fill(4);
 //! assert!(io.handle(handle, Response(response_buf)).is_none());
@@ -174,7 +174,7 @@ pub struct Io<Request, Response> {
 
 /// The holder of the Request from the Sans to Io
 pub struct IoHandle<Request, Response, Task> {
-    request: Option<Request>,
+    _request: PhantomData<Request>,
     _response: PhantomData<Response>,
     task: Pin<Task>,
 }
@@ -182,18 +182,21 @@ pub struct IoHandle<Request, Response, Task> {
 impl<Request, Response> Io<Request, Response> {
     /// Starts the Sans part defined as a Future Task. Returns on the first async Request from Sans
     /// or when the Task finishes.
-    pub fn start<Task>(&self, task: Pin<Task>) -> Option<IoHandle<Request, Response, Task>>
+    pub fn start<Task>(
+        &self,
+        task: Pin<Task>,
+    ) -> Option<(IoHandle<Request, Response, Task>, Request)>
     where
         Task: DerefMut,
         <Task as Deref>::Target: Future<Output = ()>,
     {
         let mut handler = IoHandle {
-            request: None,
+            _request: PhantomData,
             _response: PhantomData,
             task,
         };
-        handler.run_async(Channel::<Request, Response>::None);
-        handler.request.is_some().then_some(handler)
+        let request = handler.run_async(Channel::<Request, Response>::None);
+        request.map(|request| (handler, request))
     }
 
     /// Next polling of the Future Task of the Sans part. It must receive IoHandle from the
@@ -203,13 +206,13 @@ impl<Request, Response> Io<Request, Response> {
         &self,
         mut handler: IoHandle<Request, Response, Task>,
         response: Response,
-    ) -> Option<IoHandle<Request, Response, Task>>
+    ) -> Option<(IoHandle<Request, Response, Task>, Request)>
     where
         Task: DerefMut,
         <Task as Deref>::Target: Future<Output = ()>,
     {
-        handler.run_async(Channel::rx(response));
-        handler.request.is_some().then_some(handler)
+        let request = handler.run_async(Channel::rx(response));
+        request.map(|request| (handler, request))
     }
 }
 
@@ -218,17 +221,12 @@ where
     Task: DerefMut,
     <Task as Deref>::Target: Future<Output = ()>,
 {
-    /// Retrieve a reference to the Request from the Sans part.
-    pub fn message(&self) -> Option<&Request> {
-        self.request.as_ref()
-    }
-
-    fn run_async(&mut self, ch: Channel<Request, Response>) {
+    fn run_async(&mut self, ch: Channel<Request, Response>) -> Option<Request> {
         // It is safe as now there is no valid Request waiting (IoHandle was consumed)
         let waker = unsafe { Waker::new(&ch as *const _ as *const (), &WAKER_VTABLE) };
 
         let mut cx = Context::from_waker(&waker);
-        self.request = match self.task.as_mut().poll(&mut cx) {
+        match self.task.as_mut().poll(&mut cx) {
             Poll::Ready(_) => None,
             Poll::Pending => {
                 let Channel::Tx(request) = ch else {
