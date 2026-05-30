@@ -34,6 +34,24 @@ fn single_call() {
 }
 
 #[test]
+fn pin_box_single_call() {
+    struct Request;
+    struct Response;
+
+    let (sans, io) = asansio::new::<Request, Response>();
+
+    let task = Box::pin(async {
+        let handle = sans.handle(Request).await;
+        assert!(matches!(handle.message(), Some(&Response)));
+    });
+
+    let handle = io.start(task).unwrap();
+    assert!(matches!(handle.message(), Some(&Request)));
+
+    assert!(io.handle(handle, Response).is_none());
+}
+
+#[test]
 fn send_owned_payload() {
     struct Request([u8; 10]);
     struct Response([u8; 20]);

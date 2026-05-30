@@ -72,6 +72,8 @@
 
 use core::marker::PhantomData;
 use core::mem;
+use core::ops::Deref;
+use core::ops::DerefMut;
 use core::pin::Pin;
 use core::ptr;
 use core::task::Context;
@@ -171,17 +173,18 @@ pub struct Io<Request, Response> {
 }
 
 /// The holder of the Request from the Sans to Io
-pub struct IoHandle<'a, Request, Task> {
+pub struct IoHandle<Request, Task> {
     request: Option<Request>,
-    task: Pin<&'a mut Task>,
+    task: Pin<Task>,
 }
 
 impl<Request, Response> Io<Request, Response> {
     /// Starts the Sans part defined as a Future Task. Returns on the first async Request from Sans
     /// or when the Task finishes.
-    pub fn start<'a, Task>(&self, task: Pin<&'a mut Task>) -> Option<IoHandle<'a, Request, Task>>
+    pub fn start<Task>(&self, task: Pin<Task>) -> Option<IoHandle<Request, Task>>
     where
-        Task: Future<Output = ()>,
+        Task: DerefMut,
+        <Task as Deref>::Target: Future<Output = ()>,
     {
         let mut handler = IoHandle {
             request: None,
@@ -194,22 +197,24 @@ impl<Request, Response> Io<Request, Response> {
     /// Next polling of the Future Task of the Sans part. It must receive IoHandle from the
     /// previous await call as the Response is not longer valid. Returns on the Request from Sans
     /// or when the Task finishes.
-    pub fn handle<'a, Task>(
+    pub fn handle<Task>(
         &self,
-        mut handler: IoHandle<'a, Request, Task>,
+        mut handler: IoHandle<Request, Task>,
         response: Response,
-    ) -> Option<IoHandle<'a, Request, Task>>
+    ) -> Option<IoHandle<Request, Task>>
     where
-        Task: Future<Output = ()>,
+        Task: DerefMut,
+        <Task as Deref>::Target: Future<Output = ()>,
     {
         handler.run_async(Channel::rx(response));
         handler.request.is_some().then_some(handler)
     }
 }
 
-impl<'a, Request, Task> IoHandle<'a, Request, Task>
+impl<Request, Task> IoHandle<Request, Task>
 where
-    Task: Future<Output = ()>,
+    Task: DerefMut,
+    <Task as Deref>::Target: Future<Output = ()>,
 {
     /// Retrieve a reference to the Request from the Sans part.
     pub fn message(&self) -> Option<&Request> {
