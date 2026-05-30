@@ -144,7 +144,10 @@ pub struct Sans<Request, Response> {
 impl<Request: Unpin, Response: Unpin> Sans<Request, Response> {
     /// Next requests from the Sans part. It must receive SansHandle from the previous await call
     /// as the Response is not longer valid.
-    pub fn handle(&self, request: Request) -> impl Future<Output = Response> {
+    pub fn handle(
+        &self,
+        request: Request,
+    ) -> impl Future<Output = Response> + use<Request, Response> {
         SansFuture {
             request: Some(request),
             _response: PhantomData,
