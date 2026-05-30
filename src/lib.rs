@@ -21,16 +21,16 @@
 //! # use asansio::Sans;
 //! # use std::pin::pin;
 //! #
-//! struct Request<'a>(&'a [u8]);
-//! struct Response<'a>(&'a [u8]);
+//! struct Request([u8; 10]);
+//! struct Response([u8; 20]);
 //!
-//! async fn sans_task<'a>(sans: Sans<Request<'a>, Response<'a>>) {
+//! async fn sans_task(sans: Sans<Request, Response>) {
 //!     let mut request_buf = [1u8; 10];
-//!     let handle = sans.handle(Request(&request_buf)).await;
+//!     let handle = sans.handle(Request(request_buf)).await;
 //!     assert_eq!(handle.message().unwrap().0, [2; 20]);
 //!
 //!     request_buf.fill(3);
-//!     let handle = sans.handle(Request(&request_buf)).await;
+//!     let handle = sans.handle(Request(request_buf)).await;
 //!     assert_eq!(handle.message().unwrap().0, [4; 20]);
 //! }
 //!
@@ -42,11 +42,11 @@
 //! assert_eq!(handle.message().unwrap().0, [1; 10]);
 //!
 //! let mut response_buf = [2; 20];
-//! let handle = io.handle(handle, Response(&response_buf)).unwrap();
+//! let handle = io.handle(handle, Response(response_buf)).unwrap();
 //! assert_eq!(handle.message().unwrap().0, [3; 10]);
 //!
 //! response_buf.fill(4);
-//! assert!(io.handle(handle, Response(&response_buf)).is_none());
+//! assert!(io.handle(handle, Response(response_buf)).is_none());
 //! ```
 //!
 //! This crate divides a problem into two parts. The first `Sans` takes care of the state machine
@@ -173,21 +173,23 @@ pub struct Io<Request, Response> {
 }
 
 /// The holder of the Request from the Sans to Io
-pub struct IoHandle<Request, Task> {
+pub struct IoHandle<Request, Response, Task> {
     request: Option<Request>,
+    _response: PhantomData<Response>,
     task: Pin<Task>,
 }
 
 impl<Request, Response> Io<Request, Response> {
     /// Starts the Sans part defined as a Future Task. Returns on the first async Request from Sans
     /// or when the Task finishes.
-    pub fn start<Task>(&self, task: Pin<Task>) -> Option<IoHandle<Request, Task>>
+    pub fn start<Task>(&self, task: Pin<Task>) -> Option<IoHandle<Request, Response, Task>>
     where
         Task: DerefMut,
         <Task as Deref>::Target: Future<Output = ()>,
     {
         let mut handler = IoHandle {
             request: None,
+            _response: PhantomData,
             task,
         };
         handler.run_async(Channel::<Request, Response>::None);
@@ -199,9 +201,9 @@ impl<Request, Response> Io<Request, Response> {
     /// or when the Task finishes.
     pub fn handle<Task>(
         &self,
-        mut handler: IoHandle<Request, Task>,
+        mut handler: IoHandle<Request, Response, Task>,
         response: Response,
-    ) -> Option<IoHandle<Request, Task>>
+    ) -> Option<IoHandle<Request, Response, Task>>
     where
         Task: DerefMut,
         <Task as Deref>::Target: Future<Output = ()>,
@@ -211,7 +213,7 @@ impl<Request, Response> Io<Request, Response> {
     }
 }
 
-impl<Request, Task> IoHandle<Request, Task>
+impl<Request, Response, Task> IoHandle<Request, Response, Task>
 where
     Task: DerefMut,
     <Task as Deref>::Target: Future<Output = ()>,
@@ -221,7 +223,7 @@ where
         self.request.as_ref()
     }
 
-    fn run_async<Response>(&mut self, ch: Channel<Request, Response>) {
+    fn run_async(&mut self, ch: Channel<Request, Response>) {
         // It is safe as now there is no valid Request waiting (IoHandle was consumed)
         let waker = unsafe { Waker::new(&ch as *const _ as *const (), &WAKER_VTABLE) };
 

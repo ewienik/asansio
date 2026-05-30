@@ -178,10 +178,10 @@ struct Client {
     rx: Rc<RefCell<Option<pingpong_proto::Message>>>,
 
     tlv_io: Io<TlvRequest, TlvResponse>,
-    tlv_handle: Option<IoHandle<TlvRequest, Box<dyn Future<Output = ()>>>>,
+    tlv_handle: Option<IoHandle<TlvRequest, TlvResponse, Box<dyn Future<Output = ()>>>>,
 
     pp_io: Io<PpRequest, PpResponse>,
-    pp_handle: Option<IoHandle<PpRequest, Box<dyn Future<Output = ()>>>>,
+    pp_handle: Option<IoHandle<PpRequest, PpResponse, Box<dyn Future<Output = ()>>>>,
 }
 
 impl Client {
