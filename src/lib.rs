@@ -55,18 +55,24 @@
 //! These two parts communicate using `Request` and `Respond` types, which are defined by the user
 //! (for real scenarios they could be `enums`).
 //!
-//! `Sans` starts communicating with `Io` using [Sans::start] and providing the initial `Request`;
-//! it returns the [SansHandle] from the `Io`.  `Io` starts sans task by using [Io::start] which
-//! returns [IoHandle] from `Sans`. The later communication is done using [Sans::handle] and
-//! [Io::handle], which consume [SansHandle] and [IoHandle].
+//! `Sans` starts communicating with `Io` using [Sans::handle] and providing the initial `Request`;
+//! it returns the `Response` from the `Io`.  `Io` starts sans task by using [Io::start] which
+//! returns ([IoHandle], `Request`) from `Sans`. The later communication is done using
+//! [Sans::handle] and [Io::handle].
 //!
-//! See also more [examples](https://github.com/ewienik/asansio/tree/master/examples).
+//! Possible design for the implementing protocol is to create an async interface trait, which
+//! `Sans` will use as an interface to the `Io`. Application which uses async runtime can provide
+//! implementation of this trait using runtime features and use `Sans` task directly . The one
+//! which uses only `std` should implement the interface trait and use asansio crate for
+//! communicating between that interface and main loop. See a similar design in
+//! [examples](https://github.com/ewienik/asansio/tree/master/examples).
 //!
 //! ## Safety
 //!
-//! The crate uses `unsafe` parts for preparing a proper `async/await` infrastructure. Safety is
-//! guaranteed by consuming the latest [IoHandle] and [SansHandle] - these handlers store
-//! `Request` and `Response` objects and their lifetime is limited to the adjecent calls.
+//! The crate uses `unsafe` parts for preparing a proper `Waker` with internal `Channel<Request,
+//! Response>`. Safety is guaranteed by consuming the latest [IoHandle] and that you cannot mix
+//! `Request` or `Response` types (it is guaranteed by generic types of [Io], [IoHandle] and
+//! [Sans].  `Request` and `Response` types are consumed by values.
 
 #![no_std]
 

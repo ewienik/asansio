@@ -24,32 +24,32 @@ It is `no_std` crate without allocations on the heap. It depends only on the
 ## Usage
 
 ```rust
-struct Request<'a>(&'a [u8]);
-struct Response<'a>(&'a [u8]);
+struct Request([u8; 10]);
+struct Response([u8; 20]);
 
-async fn sans_task<'a>(sans: Sans<Request<'a>, Response<'a>>) {
+async fn sans_task(sans: Sans<Request, Response>) {
     let mut request_buf = [1u8; 10];
-    let handle = sans.start(&Request(&request_buf)).await;
-    assert_eq!(handle.message().unwrap().0, [2; 20]);
+    let response = sans.handle(Request(request_buf)).await;
+    assert_eq!(response.0, [2; 20]);
 
     request_buf.fill(3);
-    let handle = sans.handle(handle, &Request(&request_buf)).await;
-    assert_eq!(handle.message().unwrap().0, [4; 20]);
+    let response = sans.handle(Request(request_buf)).await;
+    assert_eq!(response.0, [4; 20]);
 }
 
 let (sans, io) = asansio::new();
 
 let task = pin!(sans_task(sans));
 
-let handle = io.start(task).unwrap();
-assert_eq!(handle.message().unwrap().0, [1; 10]);
+let (handle, request) = io.start(task).unwrap();
+assert_eq!(request.0, [1; 10]);
 
 let mut response_buf = [2; 20];
-let handle = io.handle(handle, &Response(&response_buf)).unwrap();
-assert_eq!(handle.message().unwrap().0, [3; 10]);
+let (handle, request) = io.handle(handle, Response(response_buf)).unwrap();
+assert_eq!(request.0, [3; 10]);
 
 response_buf.fill(4);
-assert!(io.handle(handle, &Response(&response_buf)).is_none());
+assert!(io.handle(handle, Response(response_buf)).is_none());
 ```
 
 The crate divides a problem into two parts. The first `Sans` takes care of the
