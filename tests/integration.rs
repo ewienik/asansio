@@ -23,8 +23,8 @@ fn single_call() {
     let (sans, io) = asansio::new::<Request, Response>();
 
     let task = pin!(async {
-        let handle = sans.handle(Request).await;
-        assert!(matches!(handle.message(), Some(&Response)));
+        let response = sans.handle(Request).await;
+        assert!(matches!(response, Response));
     });
 
     let (handle, request) = io.start(task).unwrap();
@@ -41,8 +41,8 @@ fn pin_box_single_call() {
     let (sans, io) = asansio::new::<Request, Response>();
 
     let task = Box::pin(async {
-        let handle = sans.handle(Request).await;
-        assert!(matches!(handle.message(), Some(&Response)));
+        let response = sans.handle(Request).await;
+        assert!(matches!(response, Response));
     });
 
     let (handle, request) = io.start(task).unwrap();
@@ -59,13 +59,13 @@ fn send_owned_payload() {
     let (sans, io) = asansio::new::<Request, Response>();
 
     let task = pin!(async {
-        let handle = sans.handle(Request([1; 10])).await;
-        assert!(matches!(handle.message(), Some(Response(_))));
-        assert_eq!(handle.message().unwrap().0, [2; 20]);
+        let response = sans.handle(Request([1; 10])).await;
+        assert!(matches!(response, Response(_)));
+        assert_eq!(response.0, [2; 20]);
 
-        let handle = sans.handle(Request([3; 10])).await;
-        assert!(matches!(handle.message(), Some(Response(_))));
-        assert_eq!(handle.message().unwrap().0, [4; 20]);
+        let response = sans.handle(Request([3; 10])).await;
+        assert!(matches!(response, Response(_)));
+        assert_eq!(response.0, [4; 20]);
     });
 
     let (handle, request) = io.start(task).unwrap();
@@ -110,8 +110,8 @@ impl ProtocolSync {
 impl Protocol for ProtocolSync {
     async fn alloc(&mut self, size: usize) -> Box<[u8]> {
         loop {
-            let handle = self.sans.handle(ProtocolRequest::Alloc).await;
-            if matches!(handle.message(), Some(ProtocolResponse::Done)) {
+            let response = self.sans.handle(ProtocolRequest::Alloc).await;
+            if matches!(response, ProtocolResponse::Done) {
                 break;
             }
         }
@@ -125,8 +125,8 @@ impl Protocol for ProtocolSync {
             buffer.extend_from_slice(buf);
         }
         loop {
-            let handle = self.sans.handle(ProtocolRequest::Send).await;
-            if matches!(handle.message(), Some(ProtocolResponse::Done)) {
+            let response = self.sans.handle(ProtocolRequest::Send).await;
+            if matches!(response, ProtocolResponse::Done) {
                 break;
             }
         }
@@ -136,8 +136,8 @@ impl Protocol for ProtocolSync {
     async fn recv(&mut self, buf: &mut [u8]) -> usize {
         self.buffer.borrow_mut().clear();
         loop {
-            let handle = self.sans.handle(ProtocolRequest::Recv).await;
-            if matches!(handle.message(), Some(ProtocolResponse::Done)) {
+            let response = self.sans.handle(ProtocolRequest::Recv).await;
+            if matches!(response, ProtocolResponse::Done) {
                 break;
             }
         }

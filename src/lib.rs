@@ -26,12 +26,12 @@
 //!
 //! async fn sans_task(sans: Sans<Request, Response>) {
 //!     let mut request_buf = [1u8; 10];
-//!     let handle = sans.handle(Request(request_buf)).await;
-//!     assert_eq!(handle.message().unwrap().0, [2; 20]);
+//!     let response = sans.handle(Request(request_buf)).await;
+//!     assert_eq!(response.0, [2; 20]);
 //!
 //!     request_buf.fill(3);
-//!     let handle = sans.handle(Request(request_buf)).await;
-//!     assert_eq!(handle.message().unwrap().0, [4; 20]);
+//!     let response = sans.handle(Request(request_buf)).await;
+//!     assert_eq!(response.0, [4; 20]);
 //! }
 //!
 //! let (sans, io) = asansio::new();
@@ -112,7 +112,7 @@ struct SansFuture<Request, Response> {
 }
 
 impl<Request: Unpin, Response: Unpin> Future for SansFuture<Request, Response> {
-    type Output = SansHandle<Response>;
+    type Output = Response;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let waker = cx.waker();
@@ -127,9 +127,7 @@ impl<Request: Unpin, Response: Unpin> Future for SansFuture<Request, Response> {
             Poll::Pending
         } else {
             match ch.take() {
-                Channel::Rx(response) => Poll::Ready(SansHandle {
-                    response: Some(response),
-                }),
+                Channel::Rx(response) => Poll::Ready(response),
                 Channel::Tx(_) => Poll::Pending,
                 Channel::None => unreachable!(),
             }
@@ -143,26 +141,14 @@ pub struct Sans<Request, Response> {
     _response: PhantomData<Response>,
 }
 
-/// The holder of the Response from the Io to Sans
-pub struct SansHandle<Response> {
-    response: Option<Response>,
-}
-
 impl<Request: Unpin, Response: Unpin> Sans<Request, Response> {
     /// Next requests from the Sans part. It must receive SansHandle from the previous await call
     /// as the Response is not longer valid.
-    pub fn handle(&self, request: Request) -> impl Future<Output = SansHandle<Response>> {
+    pub fn handle(&self, request: Request) -> impl Future<Output = Response> {
         SansFuture {
             request: Some(request),
             _response: PhantomData,
         }
-    }
-}
-
-impl<Response> SansHandle<Response> {
-    /// Retrieve a reference to the Response from the Io part.
-    pub fn message(&self) -> Option<&Response> {
-        self.response.as_ref()
     }
 }
 
