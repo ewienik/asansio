@@ -264,3 +264,7 @@ const WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
     |_| {},
     |_| {},
 );
+
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadMe;

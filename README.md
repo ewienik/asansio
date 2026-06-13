@@ -24,6 +24,9 @@ It is `no_std` crate without allocations on the heap. It depends only on the
 ## Usage
 
 ```rust
+use asansio::Sans;
+use std::pin::pin;
+
 struct Request([u8; 10]);
 struct Response([u8; 20]);
 
