@@ -115,6 +115,7 @@ impl<Request, Response> Channel<Request, Response> {
 struct SansFuture<Request, Response> {
     request: Option<Request>,
     _response: PhantomData<Response>,
+    _not_send_sync: PhantomData<*const ()>,
 }
 
 impl<Request: Unpin, Response: Unpin> Future for SansFuture<Request, Response> {
@@ -124,8 +125,7 @@ impl<Request: Unpin, Response: Unpin> Future for SansFuture<Request, Response> {
         let waker = cx.waker();
         assert!(ptr::eq(waker.vtable(), &WAKER_VTABLE));
 
-        // It is safe as waker is build befor each future handle call and the Channel
-        // is valid between await points.
+        // SAFETY: It is safe as Sans is !Send and Channel is valid for Io::run_async function
         let ch = unsafe { &mut *(waker.data() as *mut Channel<Request, Response>) };
 
         if let Some(request) = self.request.take() {
@@ -148,6 +148,7 @@ impl<Request: Unpin, Response: Unpin> Future for SansFuture<Request, Response> {
 pub struct Sans<Request, Response> {
     _request: PhantomData<Request>,
     _response: PhantomData<Response>,
+    _not_send_sync: PhantomData<*const ()>,
 }
 
 impl<Request: Unpin, Response: Unpin> Sans<Request, Response> {
@@ -160,6 +161,7 @@ impl<Request: Unpin, Response: Unpin> Sans<Request, Response> {
         SansFuture {
             request: Some(request),
             _response: PhantomData,
+            _not_send_sync: PhantomData,
         }
     }
 }
@@ -168,12 +170,14 @@ impl<Request: Unpin, Response: Unpin> Sans<Request, Response> {
 pub struct Io<Request, Response> {
     _request: PhantomData<Request>,
     _response: PhantomData<Response>,
+    _not_send_sync: PhantomData<*const ()>,
 }
 
 /// The holder of the Request from the Sans to Io
 pub struct IoHandle<Request, Response, Task> {
     _request: PhantomData<Request>,
     _response: PhantomData<Response>,
+    _not_send_sync: PhantomData<*const ()>,
     task: Pin<Task>,
 }
 
@@ -192,6 +196,7 @@ impl<Request, Response> Io<Request, Response> {
         let mut handler = IoHandle {
             _request: PhantomData,
             _response: PhantomData,
+            _not_send_sync: PhantomData,
             task,
         };
         let request = handler.run_async(Channel::<Request, Response>::None);
@@ -222,7 +227,8 @@ where
     <Task as Deref>::Target: Future<Output = ()>,
 {
     fn run_async(&mut self, ch: Channel<Request, Response>) -> Result<Option<Request>, Error> {
-        // It is safe as now there is no valid Request waiting (IoHandle was consumed)
+        // SAFETY: It is safe as ch: Channel is owned by this function, Sans is !Send, and
+        // WAKER_VTABLE is noop
         let waker = unsafe { Waker::new(&ch as *const _ as *const (), &WAKER_VTABLE) };
 
         let mut cx = Context::from_waker(&waker);
@@ -250,10 +256,12 @@ pub fn new<Request, Response>() -> (Sans<Request, Response>, Io<Request, Respons
         Sans {
             _request: PhantomData,
             _response: PhantomData,
+            _not_send_sync: PhantomData,
         },
         Io {
             _request: PhantomData,
             _response: PhantomData,
+            _not_send_sync: PhantomData,
         },
     )
 }
