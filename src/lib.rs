@@ -15,38 +15,83 @@
 //!
 //! ## Usage
 //!
-//! See this simple example:
+//! You can provide async iface trait that can handle all SansIo handling. This way you can use
+//! single protocol defined in async way with std or async runtime.
+//!
+//! This is the example of std interface and client:
 //!
 //! ```
-//! # use asansio::Sans;
-//! # use std::pin::pin;
-//! #
-//! struct Request([u8; 10]);
-//! struct Response([u8; 20]);
+//! use asansio::Io;
+//! use asansio::IoHandle;
+//! use asansio::Sans;
+//! use std::pin::Pin;
 //!
-//! async fn sans_task(sans: Sans<Request, Response>) {
-//!     let mut request_buf = [1u8; 10];
-//!     let response = sans.handle(Request(request_buf)).await;
-//!     assert_eq!(response.0, [2; 20]);
-//!
-//!     request_buf.fill(3);
-//!     let response = sans.handle(Request(request_buf)).await;
-//!     assert_eq!(response.0, [4; 20]);
+//! pub trait Iface {
+//!     async fn recv(&mut self) -> Option<usize>;
+//!     async fn send(&mut self, value: usize) -> Option<()>;
 //! }
 //!
-//! let (sans, io) = asansio::new();
+//! async fn run(mut iface: impl Iface) -> Option<()> {
+//!     loop {
+//!         let value = iface.recv().await?;
+//!         iface.send(value + 1).await?;
+//!     }
+//! }
 //!
-//! let task = pin!(sans_task(sans));
+//! type Request = Option<usize>;
+//! type Response = Option<usize>;
 //!
-//! let (handle, request) = io.start(task).unwrap().unwrap();
-//! assert_eq!(request.0, [1; 10]);
+//! struct IfaceStd {
+//!     response: Option<usize>,
+//!     sans: Sans<Request, Response>,
+//! }
 //!
-//! let mut response_buf = [2; 20];
-//! let (handle, request) = io.handle(handle, Response(response_buf)).unwrap().unwrap();
-//! assert_eq!(request.0, [3; 10]);
+//! impl Iface for IfaceStd {
+//!     async fn recv(&mut self) -> Option<usize> {
+//!        if let Some(response) = self.response.take() {
+//!            return Some(response);
+//!        }
+//!        self.sans.handle(None).await
+//!     }
 //!
-//! response_buf.fill(4);
-//! assert!(io.handle(handle, Response(response_buf)).unwrap().is_none());
+//!     async fn send(&mut self, value: usize) -> Option<()> {
+//!        self.response = self.sans.handle(Some(value)).await;
+//!        self.response.map(|_| ())
+//!     }
+//! }
+//!
+//! struct ClientStd {
+//!     io: Io<Request, Response>,
+//!     handle: Option<IoHandle<Request, Response, Box<dyn Future<Output = ()>>>>,
+//! }
+//!
+//! impl ClientStd {
+//!     fn new() -> Option<Self> {
+//!         let (sans, io) = asansio::new::<Request, Response>();
+//!         let proto = Box::pin({
+//!             async move {
+//!                 run(IfaceStd { response: None, sans }).await.unwrap_or(());
+//!             }
+//!         }) as Pin<Box<dyn Future<Output = ()>>>;
+//!         let (handle, request) = io.start(proto).ok().flatten()?;
+//!         assert_eq!(request, None);
+//!         let handle = Some(handle);
+//!         Some(Self { io, handle })
+//!     }
+//!
+//!    fn call(&mut self, value: usize) -> Option<usize> {
+//!        let handle = self.handle.take().unwrap();
+//!        let (handle, request) = self.io.handle(handle, Some(value)).unwrap()?;
+//!        self.handle = Some(handle);
+//!        request
+//!    }
+//! }
+//!
+//! let mut client = ClientStd::new().unwrap();
+//!
+//! assert_eq!(client.call(0), Some(1));
+//! assert_eq!(client.call(2), Some(3));
+//! assert_eq!(client.call(8), Some(9));
 //! ```
 //!
 //! This crate divides a problem into two parts. The first `Sans` takes care of the state machine
