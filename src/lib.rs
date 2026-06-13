@@ -38,15 +38,15 @@
 //!
 //! let task = pin!(sans_task(sans));
 //!
-//! let (handle, request) = io.start(task).unwrap();
+//! let (handle, request) = io.start(task).unwrap().unwrap();
 //! assert_eq!(request.0, [1; 10]);
 //!
 //! let mut response_buf = [2; 20];
-//! let (handle, request) = io.handle(handle, Response(response_buf)).unwrap();
+//! let (handle, request) = io.handle(handle, Response(response_buf)).unwrap().unwrap();
 //! assert_eq!(request.0, [3; 10]);
 //!
 //! response_buf.fill(4);
-//! assert!(io.handle(handle, Response(response_buf)).is_none());
+//! assert!(io.handle(handle, Response(response_buf)).unwrap().is_none());
 //! ```
 //!
 //! This crate divides a problem into two parts. The first `Sans` takes care of the state machine
@@ -133,9 +133,12 @@ impl<Request: Unpin, Response: Unpin> Future for SansFuture<Request, Response> {
             Poll::Pending
         } else {
             match ch.take() {
+                // There is an answer from the Io part
                 Channel::Rx(response) => Poll::Ready(response),
+                // There is still a request from the Sans part
                 Channel::Tx(_) => Poll::Pending,
-                Channel::None => unreachable!(),
+                // There is inconsistency, let's return error in Io's handle method
+                Channel::None => Poll::Pending,
             }
         }
     }
@@ -175,12 +178,13 @@ pub struct IoHandle<Request, Response, Task> {
 }
 
 impl<Request, Response> Io<Request, Response> {
+    #[allow(clippy::type_complexity)]
     /// Starts the Sans part defined as a Future Task. Returns on the first async Request from Sans
     /// or when the Task finishes.
     pub fn start<Task>(
         &self,
         task: Pin<Task>,
-    ) -> Option<(IoHandle<Request, Response, Task>, Request)>
+    ) -> Result<Option<(IoHandle<Request, Response, Task>, Request)>, Error>
     where
         Task: DerefMut,
         <Task as Deref>::Target: Future<Output = ()>,
@@ -191,9 +195,10 @@ impl<Request, Response> Io<Request, Response> {
             task,
         };
         let request = handler.run_async(Channel::<Request, Response>::None);
-        request.map(|request| (handler, request))
+        request.map(|request| request.map(|request| (handler, request)))
     }
 
+    #[allow(clippy::type_complexity)]
     /// Next polling of the Future Task of the Sans part. It must receive IoHandle from the
     /// previous await call as the Response is not longer valid. Returns on the Request from Sans
     /// or when the Task finishes.
@@ -201,13 +206,13 @@ impl<Request, Response> Io<Request, Response> {
         &self,
         mut handler: IoHandle<Request, Response, Task>,
         response: Response,
-    ) -> Option<(IoHandle<Request, Response, Task>, Request)>
+    ) -> Result<Option<(IoHandle<Request, Response, Task>, Request)>, Error>
     where
         Task: DerefMut,
         <Task as Deref>::Target: Future<Output = ()>,
     {
         let request = handler.run_async(Channel::rx(response));
-        request.map(|request| (handler, request))
+        request.map(|request| request.map(|request| (handler, request)))
     }
 }
 
@@ -216,21 +221,27 @@ where
     Task: DerefMut,
     <Task as Deref>::Target: Future<Output = ()>,
 {
-    fn run_async(&mut self, ch: Channel<Request, Response>) -> Option<Request> {
+    fn run_async(&mut self, ch: Channel<Request, Response>) -> Result<Option<Request>, Error> {
         // It is safe as now there is no valid Request waiting (IoHandle was consumed)
         let waker = unsafe { Waker::new(&ch as *const _ as *const (), &WAKER_VTABLE) };
 
         let mut cx = Context::from_waker(&waker);
         match self.task.as_mut().poll(&mut cx) {
-            Poll::Ready(_) => None,
+            Poll::Ready(_) => Ok(None),
             Poll::Pending => {
-                let Channel::Tx(request) = ch else {
-                    unreachable!();
-                };
-                Some(request)
+                if let Channel::Tx(request) = ch {
+                    Ok(Some(request))
+                } else {
+                    Err(Error::Inconsistency)
+                }
             }
         }
     }
+}
+
+#[derive(Debug)]
+pub enum Error {
+    Inconsistency,
 }
 
 /// Creates a two parts: Sans and Io for the specified Request and Response.

@@ -225,9 +225,9 @@ impl Client {
             }
         }) as Pin<Box<dyn Future<Output = ()>>>;
 
-        let (tlv_handle, tlv_request) = tlv_io.start(tlv_proto)?;
+        let (tlv_handle, tlv_request) = tlv_io.start(tlv_proto).ok().flatten()?;
         let tlv_handle = Some(tlv_handle);
-        let (pp_handle, pp_request) = pp_io.start(pp_proto)?;
+        let (pp_handle, pp_request) = pp_io.start(pp_proto).ok().flatten()?;
         let pp_handle = Some(pp_handle);
 
         Some(Self {
@@ -273,12 +273,16 @@ impl Client {
     fn process(&mut self) -> Option<()> {
         let (tlv_handle, tlv_request) = self
             .tlv_io
-            .handle(self.tlv_handle.take()?, TlvResponse::Done)?;
+            .handle(self.tlv_handle.take()?, TlvResponse::Done)
+            .ok()
+            .flatten()?;
         self.tlv_handle = Some(tlv_handle);
         self.tlv_request = tlv_request;
         let (pp_handle, pp_request) = self
             .pp_io
-            .handle(self.pp_handle.take()?, PpResponse::Done)?;
+            .handle(self.pp_handle.take()?, PpResponse::Done)
+            .ok()
+            .flatten()?;
         self.pp_handle = Some(pp_handle);
         self.pp_request = pp_request;
         Some(())

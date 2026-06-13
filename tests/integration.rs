@@ -12,7 +12,7 @@ fn no_response() {
     let (_, io) = asansio::new::<Request, Response>();
 
     let task = pin!(async {});
-    assert!(io.start(task).is_none());
+    assert!(io.start(task).unwrap().is_none());
 }
 
 #[test]
@@ -27,10 +27,10 @@ fn single_call() {
         assert!(matches!(response, Response));
     });
 
-    let (handle, request) = io.start(task).unwrap();
+    let (handle, request) = io.start(task).unwrap().unwrap();
     assert!(matches!(request, Request));
 
-    assert!(io.handle(handle, Response).is_none());
+    assert!(io.handle(handle, Response).unwrap().is_none());
 }
 
 #[test]
@@ -45,10 +45,10 @@ fn pin_box_single_call() {
         assert!(matches!(response, Response));
     });
 
-    let (handle, request) = io.start(task).unwrap();
+    let (handle, request) = io.start(task).unwrap().unwrap();
     assert!(matches!(request, Request));
 
-    assert!(io.handle(handle, Response).is_none());
+    assert!(io.handle(handle, Response).unwrap().is_none());
 }
 
 #[test]
@@ -68,15 +68,15 @@ fn send_owned_payload() {
         assert_eq!(response.0, [4; 20]);
     });
 
-    let (handle, request) = io.start(task).unwrap();
+    let (handle, request) = io.start(task).unwrap().unwrap();
     assert!(matches!(request, Request(_)));
     assert_eq!(request.0, [1; 10]);
 
-    let (handle, request) = io.handle(handle, Response([2; 20])).unwrap();
+    let (handle, request) = io.handle(handle, Response([2; 20])).unwrap().unwrap();
     assert!(matches!(request, Request(_)));
     assert_eq!(request.0, [3; 10]);
 
-    assert!(io.handle(handle, Response([4; 20])).is_none());
+    assert!(io.handle(handle, Response([4; 20])).unwrap().is_none());
 }
 
 trait Protocol {
@@ -209,38 +209,38 @@ fn simple_protocol_sync() {
 
     let task = pin!(run(proto));
 
-    let (handle, request) = io.start(task).unwrap();
+    let (handle, request) = io.start(task).unwrap().unwrap();
     assert!(matches!(request, ProtocolRequest::Alloc));
 
-    let (handle, request) = io.handle(handle, ProtocolResponse::Wait).unwrap();
+    let (handle, request) = io.handle(handle, ProtocolResponse::Wait).unwrap().unwrap();
     assert!(matches!(request, ProtocolRequest::Alloc));
 
-    let (handle, request) = io.handle(handle, ProtocolResponse::Done).unwrap();
+    let (handle, request) = io.handle(handle, ProtocolResponse::Done).unwrap().unwrap();
     assert!(matches!(request, ProtocolRequest::Send));
     assert_eq!(buffer.borrow().as_slice(), *b"aa");
 
-    let (handle, request) = io.handle(handle, ProtocolResponse::Wait).unwrap();
+    let (handle, request) = io.handle(handle, ProtocolResponse::Wait).unwrap().unwrap();
     assert!(matches!(request, ProtocolRequest::Send));
     assert_eq!(buffer.borrow().as_slice(), *b"aa");
 
-    let (handle, request) = io.handle(handle, ProtocolResponse::Done).unwrap();
+    let (handle, request) = io.handle(handle, ProtocolResponse::Done).unwrap().unwrap();
     assert!(matches!(request, ProtocolRequest::Recv));
 
-    let (handle, request) = io.handle(handle, ProtocolResponse::Wait).unwrap();
+    let (handle, request) = io.handle(handle, ProtocolResponse::Wait).unwrap().unwrap();
     assert!(matches!(request, ProtocolRequest::Recv));
 
     buffer.borrow_mut().clear();
     buffer.borrow_mut().extend_from_slice(b"bb");
-    let (handle, request) = io.handle(handle, ProtocolResponse::Done).unwrap();
+    let (handle, request) = io.handle(handle, ProtocolResponse::Done).unwrap().unwrap();
     assert!(matches!(request, ProtocolRequest::Send));
     assert_eq!(buffer.borrow().as_slice(), *b"cc");
 
-    let (handle, request) = io.handle(handle, ProtocolResponse::Done).unwrap();
+    let (handle, request) = io.handle(handle, ProtocolResponse::Done).unwrap().unwrap();
     assert!(matches!(request, ProtocolRequest::Recv));
 
     buffer.borrow_mut().clear();
     buffer.borrow_mut().extend_from_slice(b"dd");
-    assert!(io.handle(handle, ProtocolResponse::Done).is_none());
+    assert!(io.handle(handle, ProtocolResponse::Done).unwrap().is_none());
 }
 
 #[tokio::test]

@@ -41,15 +41,15 @@ let (sans, io) = asansio::new();
 
 let task = pin!(sans_task(sans));
 
-let (handle, request) = io.start(task).unwrap();
+let (handle, request) = io.start(task).unwrap().unwrap();
 assert_eq!(request.0, [1; 10]);
 
 let mut response_buf = [2; 20];
-let (handle, request) = io.handle(handle, Response(response_buf)).unwrap();
+let (handle, request) = io.handle(handle, Response(response_buf)).unwrap().unwrap();
 assert_eq!(request.0, [3; 10]);
 
 response_buf.fill(4);
-assert!(io.handle(handle, Response(response_buf)).is_none());
+assert!(io.handle(handle, Response(response_buf)).unwrap().is_none());
 ```
 
 The crate divides a problem into two parts. The first `Sans` takes care of the
