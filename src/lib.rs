@@ -51,11 +51,11 @@
 //!        if let Some(response) = self.response.take() {
 //!            return Some(response);
 //!        }
-//!        self.sans.handle(None).await
+//!        self.sans.handle(None).await.unwrap()
 //!     }
 //!
 //!     async fn send(&mut self, value: usize) -> Option<()> {
-//!        self.response = self.sans.handle(Some(value)).await;
+//!        self.response = self.sans.handle(Some(value)).await.unwrap();
 //!        self.response.map(|_| ())
 //!     }
 //! }
@@ -164,11 +164,13 @@ struct SansFuture<Request, Response> {
 }
 
 impl<Request: Unpin, Response: Unpin> Future for SansFuture<Request, Response> {
-    type Output = Response;
+    type Output = Result<Response, Error>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let waker = cx.waker();
-        assert!(ptr::eq(waker.vtable(), WAKER_VTABLE));
+        if !ptr::eq(waker.vtable(), WAKER_VTABLE) {
+            return Poll::Ready(Err(Error::Runtime));
+        }
 
         // SAFETY: It is safe as Sans is !Send and Channel is valid for Io::run_async function
         let ch = unsafe { &mut *(waker.data() as *mut Channel<Request, Response>) };
@@ -179,7 +181,7 @@ impl<Request: Unpin, Response: Unpin> Future for SansFuture<Request, Response> {
         } else {
             match ch.take() {
                 // There is an answer from the Io part
-                Channel::Rx(response) => Poll::Ready(response),
+                Channel::Rx(response) => Poll::Ready(Ok(response)),
                 // There is still a request from the Sans part
                 Channel::Tx(_) => Poll::Pending,
                 // There is inconsistency, let's return error in Io's handle method
@@ -202,7 +204,7 @@ impl<Request: Unpin, Response: Unpin> Sans<Request, Response> {
     pub fn handle(
         &self,
         request: Request,
-    ) -> impl Future<Output = Response> + use<Request, Response> {
+    ) -> impl Future<Output = Result<Response, Error>> + use<Request, Response> {
         SansFuture {
             request: Some(request),
             _response: PhantomData,
@@ -293,6 +295,7 @@ where
 #[derive(Debug)]
 pub enum Error {
     Inconsistency,
+    Runtime,
 }
 
 /// Creates a two parts: Sans and Io for the specified Request and Response.

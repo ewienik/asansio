@@ -77,7 +77,7 @@ impl tlv_proto::Iface for TlvProto {
             if let Some(message) = self.upstream_recv.borrow_mut().take() {
                 return Ok(tlv_proto::Recv::Upstream(message));
             }
-            self.sans.handle(TlvRequest::Recv).await;
+            self.sans.handle(TlvRequest::Recv).await.unwrap();
         }
     }
 
@@ -91,7 +91,7 @@ impl tlv_proto::Iface for TlvProto {
                 *self.upstream_send.borrow_mut() = Some(message);
                 return Ok(());
             }
-            self.sans.handle(TlvRequest::Send).await;
+            self.sans.handle(TlvRequest::Send).await.unwrap();
         }
     }
 }
@@ -145,7 +145,7 @@ impl pingpong_proto::Iface for PpProto {
             if let Some(message) = self.upstream_recv.borrow_mut().take() {
                 return Ok(pingpong_proto::Recv::Upstream(message));
             }
-            self.sans.handle(PpRequest::Recv).await;
+            self.sans.handle(PpRequest::Recv).await.unwrap();
         }
     }
 
@@ -158,7 +158,7 @@ impl pingpong_proto::Iface for PpProto {
                 *self.downstream_send.borrow_mut() = Some(from_payload(payload));
                 return Ok(());
             }
-            self.sans.handle(PpRequest::SendDownstream).await;
+            self.sans.handle(PpRequest::SendDownstream).await.unwrap();
         }
     }
 
@@ -168,7 +168,7 @@ impl pingpong_proto::Iface for PpProto {
                 *self.upstream_send.borrow_mut() = Some(message);
                 return Ok(());
             }
-            self.sans.handle(PpRequest::SendUpstream).await;
+            self.sans.handle(PpRequest::SendUpstream).await.unwrap();
         }
     }
 }

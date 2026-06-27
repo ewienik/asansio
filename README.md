@@ -59,11 +59,11 @@ impl Iface for IfaceStd {
        if let Some(response) = self.response.take() {
            return Some(response);
        }
-       self.sans.handle(None).await
+       self.sans.handle(None).await.unwrap()
     }
 
     async fn send(&mut self, value: usize) -> Option<()> {
-       self.response = self.sans.handle(Some(value)).await;
+       self.response = self.sans.handle(Some(value)).await.unwrap();
        self.response.map(|_| ())
     }
 }

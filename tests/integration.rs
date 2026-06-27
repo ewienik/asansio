@@ -23,7 +23,7 @@ fn single_call() {
     let (sans, io) = asansio::new::<Request, Response>();
 
     let task = pin!(async {
-        let response = sans.handle(Request).await;
+        let response = sans.handle(Request).await.unwrap();
         assert!(matches!(response, Response));
     });
 
@@ -41,7 +41,7 @@ fn pin_box_single_call() {
     let (sans, io) = asansio::new::<Request, Response>();
 
     let task = Box::pin(async {
-        let response = sans.handle(Request).await;
+        let response = sans.handle(Request).await.unwrap();
         assert!(matches!(response, Response));
     });
 
@@ -59,11 +59,11 @@ fn send_owned_payload() {
     let (sans, io) = asansio::new::<Request, Response>();
 
     let task = pin!(async {
-        let response = sans.handle(Request([1; 10])).await;
+        let response = sans.handle(Request([1; 10])).await.unwrap();
         assert!(matches!(response, Response(_)));
         assert_eq!(response.0, [2; 20]);
 
-        let response = sans.handle(Request([3; 10])).await;
+        let response = sans.handle(Request([3; 10])).await.unwrap();
         assert!(matches!(response, Response(_)));
         assert_eq!(response.0, [4; 20]);
     });
@@ -111,7 +111,7 @@ impl Protocol for ProtocolSync {
     async fn alloc(&mut self, size: usize) -> Box<[u8]> {
         loop {
             let response = self.sans.handle(ProtocolRequest::Alloc).await;
-            if matches!(response, ProtocolResponse::Done) {
+            if matches!(response, Ok(ProtocolResponse::Done)) {
                 break;
             }
         }
@@ -126,7 +126,7 @@ impl Protocol for ProtocolSync {
         }
         loop {
             let response = self.sans.handle(ProtocolRequest::Send).await;
-            if matches!(response, ProtocolResponse::Done) {
+            if matches!(response, Ok(ProtocolResponse::Done)) {
                 break;
             }
         }
@@ -137,7 +137,7 @@ impl Protocol for ProtocolSync {
         self.buffer.borrow_mut().clear();
         loop {
             let response = self.sans.handle(ProtocolRequest::Recv).await;
-            if matches!(response, ProtocolResponse::Done) {
+            if matches!(response, Ok(ProtocolResponse::Done)) {
                 break;
             }
         }
