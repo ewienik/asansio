@@ -192,6 +192,7 @@ impl<Request: Unpin, Response: Unpin> Future for SansFuture<Request, Response> {
 }
 
 /// Manages the Sans part
+#[derive(Debug)]
 pub struct Sans<Request, Response> {
     _request: PhantomData<Request>,
     _response: PhantomData<Response>,
@@ -214,6 +215,7 @@ impl<Request: Unpin, Response: Unpin> Sans<Request, Response> {
 }
 
 /// Manages the Io part
+#[derive(Debug)]
 pub struct Io<Request, Response> {
     _request: PhantomData<Request>,
     _response: PhantomData<Response>,
@@ -221,6 +223,7 @@ pub struct Io<Request, Response> {
 }
 
 /// The holder of the Request from the Sans to Io
+#[derive(Debug)]
 pub struct IoHandle<Request, Response, Task> {
     _request: PhantomData<Request>,
     _response: PhantomData<Response>,
