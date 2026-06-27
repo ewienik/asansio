@@ -168,7 +168,7 @@ impl<Request: Unpin, Response: Unpin> Future for SansFuture<Request, Response> {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let waker = cx.waker();
-        assert!(ptr::eq(waker.vtable(), &WAKER_VTABLE));
+        assert!(ptr::eq(waker.vtable(), WAKER_VTABLE));
 
         // SAFETY: It is safe as Sans is !Send and Channel is valid for Io::run_async function
         let ch = unsafe { &mut *(waker.data() as *mut Channel<Request, Response>) };
@@ -271,10 +271,10 @@ where
     Task: DerefMut,
     <Task as Deref>::Target: Future<Output = ()>,
 {
-    fn run_async(&mut self, ch: Channel<Request, Response>) -> Result<Option<Request>, Error> {
+    fn run_async(&mut self, mut ch: Channel<Request, Response>) -> Result<Option<Request>, Error> {
         // SAFETY: It is safe as ch: Channel is owned by this function, Sans is !Send, and
         // WAKER_VTABLE is noop
-        let waker = unsafe { Waker::new(&ch as *const _ as *const (), &WAKER_VTABLE) };
+        let waker = unsafe { Waker::new(&mut ch as *mut _ as *mut (), WAKER_VTABLE) };
 
         let mut cx = Context::from_waker(&waker);
         match self.task.as_mut().poll(&mut cx) {
@@ -311,8 +311,8 @@ pub fn new<Request, Response>() -> (Sans<Request, Response>, Io<Request, Respons
     )
 }
 
-const WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
-    |data| RawWaker::new(data, &WAKER_VTABLE),
+const WAKER_VTABLE: &RawWakerVTable = &RawWakerVTable::new(
+    |data| RawWaker::new(data, WAKER_VTABLE),
     |_| {},
     |_| {},
     |_| {},
